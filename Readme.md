@@ -26,7 +26,7 @@ The application is already usable, but still under development. Minor bugs may o
 
 ## 💻 Requirements
 
-* Windows operating system
+* Windows 10/11 operating system
 * Administrator privileges (required for modifying IP settings)
 
 ## ▶️ Usage
@@ -42,10 +42,34 @@ No installation required.
 The application supports both Hungarian and English.
 Language can be changed from the menu.
 
+## 🛡️ Security Note
+
+The executable file was scanned using antivirus software.
+
+Due to the use of PyInstaller, some antivirus engines may report false positives.
+
+The file is safe to use if downloaded from the official GitHub repository.
+
+VirusTotal scan result:
+https://www.virustotal.com/gui/file/751e6c4dd9a5be662119360db8dc70b38086a1c249d8dbc8288ea24b1e7a2469/detection
+
 ## 📝 Note
 
 This tool was originally created for personal use and later shared publicly.
 Development is ongoing, and features may change in future versions.
+
+## 📄 Changelog
+
+v0.8.1
+* Improved scan stability
+* Better device detection during scan
+* Increased font size for improved readability
+
+v0.8
+* Initial public release
+* IP configuration
+* Ping functionality
+* Basic network scanning
 
 ## 👤 Author
 

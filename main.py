@@ -85,7 +85,7 @@ LANGUAGES = {
         "menu_help":              "Súgó",
         "menu_help_about":        "Névjegy",
         "about_title":            "Névjegy",
-        "about_version":          "Verzió: 0.8",
+        "about_version":          "Verzió: 0.8.1",
         "about_author":           "Készítette: Nozy82",
         "about_desc":             "Hálózati eszköz IP beállításhoz, pingeléshez és szkenneléshez.",
         "about_github":           "Forráskód és letöltés:",
@@ -169,7 +169,7 @@ LANGUAGES = {
         "menu_help":              "Help",
         "menu_help_about":        "About",
         "about_title":            "About",
-        "about_version":          "Version: 0.8",
+        "about_version":          "Version: 0.8.1",
         "about_author":           "Created by: Nozy82",
         "about_desc":             "Network tool for IP configuration, ping and scanning.",
         "about_github":           "Source code and download:",
@@ -487,7 +487,7 @@ class OctetField(QLineEdit):
             QLineEdit {
                 background-color: #16213e; color: #ffffff;
                 border: 1px solid #333; border-radius: 4px;
-                font-size: 11px; padding: 2px;
+                font-size: 13px; padding: 2px;
             }
             QLineEdit:focus { border: 1px solid #4a9eff; }
             QLineEdit:disabled {
@@ -500,7 +500,7 @@ class OctetField(QLineEdit):
             QLineEdit {
                 background-color: #3a0000; color: #ff6666;
                 border: 1px solid #ff3333; border-radius: 4px;
-                font-size: 11px; padding: 2px;
+                font-size: 13px; padding: 2px;
             }
             QLineEdit:focus { border: 1px solid #ff3333; }
         """
@@ -570,7 +570,7 @@ def make_octet_row():
         layout.addWidget(f)
         if i < 3:
             dot = QLabel(".")
-            dot.setStyleSheet("color:#666; font-size:12px;")
+            dot.setStyleSheet("color:#666; font-size:14px;")
             dot.setFixedWidth(6)
             layout.addWidget(dot)
     layout.addStretch()
@@ -602,7 +602,7 @@ class IPSettingsTab(QWidget):
 
         info_frame = QFrame()
         info_frame.setStyleSheet(
-            "QFrame { background:#1a1a2e; border:1px solid #2a2a4a; border-radius:8px; }"
+            "QFrame { background:#1a1a2e; border:1px solid #2a2a4a; border-radius:10px; }"
         )
         info_grid = QGridLayout(info_frame)
         info_grid.setContentsMargins(16, 12, 16, 12)
@@ -616,10 +616,10 @@ class IPSettingsTab(QWidget):
             "ip_type", "ip_dns",
         ]):
             lbl = QLabel(f"{t(key)}:")
-            lbl.setStyleSheet("color:#666; font-size:9px;")
+            lbl.setStyleSheet("color:#666; font-size:11px;")
             lbl.setFixedWidth(130)
             val = QLabel("–")
-            val.setStyleSheet("color:#cccccc; font-size:9px;")
+            val.setStyleSheet("color:#cccccc; font-size:11px;")
             val.setWordWrap(True)
             info_grid.addWidget(lbl, i, 0)
             info_grid.addWidget(val, i, 1)
@@ -661,7 +661,7 @@ class IPSettingsTab(QWidget):
             row = QHBoxLayout()
             lbl = QLabel(f"{t(key)}:")
             lbl.setFixedWidth(130)
-            lbl.setStyleSheet("color:#888; font-size:9px;")
+            lbl.setStyleSheet("color:#888; font-size:11px;")
             w, fields = make_octet_row()
             setattr(self, attr, fields)
             row.addWidget(lbl)
@@ -689,7 +689,7 @@ class IPSettingsTab(QWidget):
 
         self.lbl_status = QLabel("")
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_status.setStyleSheet("font-size:9px; padding:4px;")
+        self.lbl_status.setStyleSheet("font-size:11px; padding:4px;")
         self.lbl_status.setVisible(False)
         main.addWidget(self.lbl_status)
 
@@ -703,7 +703,7 @@ class IPSettingsTab(QWidget):
     def _section_label(self, key):
         lbl = QLabel(t(key))
         lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        lbl.setStyleSheet("color:#4a9eff; font-size:10px;")
+        lbl.setStyleSheet("color:#4a9eff; font-size:12px;")
         return lbl
 
     def _set_mode(self, static):
@@ -720,11 +720,11 @@ class IPSettingsTab(QWidget):
     def _update_mode_buttons(self):
         active = (
             "QPushButton { background-color:#1e3a5f; color:#4a9eff; "
-            "border:1px solid #4a9eff; border-radius:4px; font-size:10px; }"
+            "border:1px solid #4a9eff; border-radius:4px; font-size:12px; }"
         )
         inactive = (
             "QPushButton { background-color:#1a1a2e; color:#555; "
-            "border:1px solid #333; border-radius:4px; font-size:10px; } "
+            "border:1px solid #333; border-radius:4px; font-size:12px; } "
             "QPushButton:hover { color:#aaa; border-color:#555; }"
         )
         self.btn_dhcp.setStyleSheet(active if not self._static_mode else inactive)
@@ -890,7 +890,7 @@ class IPSettingsTab(QWidget):
 
     def _show_status(self, msg, error=False):
         color = "#F44336" if error else "#4CAF50"
-        self.lbl_status.setStyleSheet(f"font-size:9px; color:{color}; padding:4px;")
+        self.lbl_status.setStyleSheet(f"font-size:11px; color:{color}; padding:4px;")
         self.lbl_status.setText(msg)
         self.lbl_status.setVisible(True)
         QTimer.singleShot(5000, lambda: self.lbl_status.setVisible(False))
@@ -959,14 +959,14 @@ class PingTab(QWidget):
         # Cím
         self.lbl_title = QLabel(t("ping_title"))
         self.lbl_title.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        self.lbl_title.setStyleSheet("color:#4a9eff; font-size:10px;")
+        self.lbl_title.setStyleSheet("color:#4a9eff; font-size:12px;")
         main.addWidget(self.lbl_title)
 
         # IP beviteli sor
         ip_row = QHBoxLayout()
         self.lbl_target = QLabel(f"{t('ping_target')}:")
         self.lbl_target.setFixedWidth(130)
-        self.lbl_target.setStyleSheet("color:#888; font-size:9px;")
+        self.lbl_target.setStyleSheet("color:#888; font-size:11px;")
         ip_row.addWidget(self.lbl_target)
 
         self.ip_widget, self.ip_fields = make_octet_row()
@@ -983,7 +983,7 @@ class PingTab(QWidget):
         self.btn_ping.setStyleSheet("""
             QPushButton {
                 background-color:#1e3a5f; color:#4a9eff;
-                border:1px solid #4a9eff; border-radius:4px; font-size:10px;
+                border:1px solid #4a9eff; border-radius:4px; font-size:12px;
             }
             QPushButton:hover { background-color:#4a9eff; color:#ffffff; }
             QPushButton:disabled { background-color:#1a1a2e; color:#444; border-color:#333; }
@@ -1002,8 +1002,8 @@ class PingTab(QWidget):
                 border: 1px solid #2a2a4a;
                 border-radius: 6px;
                 font-family: 'Consolas', monospace;
-                font-size: 9px;
-                padding: 10px;
+                font-size: 11px;
+                padding: 12px;
             }
         """)
         self.result_box.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
@@ -1021,7 +1021,7 @@ class PingTab(QWidget):
         self.btn_clear.setStyleSheet("""
             QPushButton {
                 background-color:#1a1a2e; color:#666;
-                border:1px solid #333; border-radius:4px; font-size:9px;
+                border:1px solid #333; border-radius:4px; font-size:11px;
             }
             QPushButton:hover { color:#aaa; border-color:#555; }
         """)
@@ -1143,7 +1143,7 @@ class ScanThread(QThread):
     progress     = pyqtSignal(int, int)  # aktuális, összes
     finished     = pyqtSignal(int)    # találatok száma
 
-    def __init__(self, base_ip, start_ip, end_ip, max_workers=50):
+    def __init__(self, base_ip, start_ip, end_ip, max_workers=25):
         super().__init__()
         self.base_ip     = base_ip
         self.start_ip    = start_ip
@@ -1197,7 +1197,7 @@ class ScanThread(QThread):
 
             # Kis várakozás hogy az ARP cache feltöltődjön
             import time
-            time.sleep(0.1)
+            time.sleep(0.2)
 
             mac    = "–"
             vendor = "–"
@@ -1313,9 +1313,9 @@ class ScanResultTable(QWidget):
                     color: #4a9eff;
                     border: none;
                     border-bottom: 1px solid #2a2a4a;
-                    font-size: 9px;
+                    font-size: 11px;
                     font-weight: bold;
-                    padding: 0 8px;
+                    padding: 0 10px;
                     text-align: left;
                 }
                 QPushButton:hover { background-color: #16213e; }
@@ -1406,7 +1406,7 @@ class ScanResultTable(QWidget):
                 lbl = QLabel(row.get(field, "–"))
                 lbl.setFixedWidth(col_widths[j] if j < len(col_widths) else 120)
                 lbl.setStyleSheet(
-                    "color:#cccccc; font-size:9px; padding:2px 8px;"
+                    "color:#cccccc; font-size:11px; padding:2px 10px;"
                     "border-right:1px solid #1a1a2e;"
                 )
                 if field in ("vendor", "hostname"):
@@ -1440,14 +1440,14 @@ class ScanTab(QWidget):
         # Cím
         self.lbl_title = QLabel(t("scan_title"))
         self.lbl_title.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        self.lbl_title.setStyleSheet("color:#4a9eff; font-size:10px;")
+        self.lbl_title.setStyleSheet("color:#4a9eff; font-size:12px;")
         main.addWidget(self.lbl_title)
 
         # Tartomány sor
         range_row = QHBoxLayout()
 
         self.lbl_from = QLabel(f"{t('scan_range_from')}:")
-        self.lbl_from.setStyleSheet("color:#888; font-size:9px;")
+        self.lbl_from.setStyleSheet("color:#888; font-size:11px;")
         self.lbl_from.setFixedWidth(110)
         range_row.addWidget(self.lbl_from)
 
@@ -1457,7 +1457,7 @@ class ScanTab(QWidget):
         range_row.addSpacing(16)
 
         self.lbl_to = QLabel(f"{t('scan_range_to')}:")
-        self.lbl_to.setStyleSheet("color:#888; font-size:9px;")
+        self.lbl_to.setStyleSheet("color:#888; font-size:11px;")
         self.lbl_to.setFixedWidth(110)
         range_row.addWidget(self.lbl_to)
 
@@ -1484,8 +1484,8 @@ class ScanTab(QWidget):
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color:#1a1a2e; color:{color};
-                    border:1px solid {color}; border-radius:4px; font-size:9px;
-                    padding: 0 12px;
+                    border:1px solid {color}; border-radius:4px; font-size:11px;
+                    padding: 0 14px;
                 }}
                 QPushButton:hover {{ background-color:#16213e; }}
                 QPushButton:disabled {{ color:#333; border-color:#333; }}
@@ -1507,7 +1507,7 @@ class ScanTab(QWidget):
 
         # Státusz sor
         self.lbl_status = QLabel("")
-        self.lbl_status.setStyleSheet("color:#888; font-size:9px;")
+        self.lbl_status.setStyleSheet("color:#888; font-size:11px;")
         main.addWidget(self.lbl_status)
 
         # Eredmény táblázat
@@ -1554,7 +1554,7 @@ class ScanTab(QWidget):
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
 
-        self._scan_thread = ScanThread(base_ip, start, end, max_workers=50)
+        self._scan_thread = ScanThread(base_ip, start, end, max_workers=25)
         self._scan_thread.result_found.connect(self._on_result)
         self._scan_thread.progress.connect(self._on_progress)
         self._scan_thread.finished.connect(self._on_done)
@@ -1672,20 +1672,20 @@ class AboutDialog(QDialog):
             lbl = QLabel(t(key))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setWordWrap(True)
-            lbl.setStyleSheet("color:#aaaaaa; font-size:10px;")
+            lbl.setStyleSheet("color:#aaaaaa; font-size:12px;")
             layout.addWidget(lbl)
 
         # GitHub link
         github_lbl = QLabel(t("about_github"))
         github_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        github_lbl.setStyleSheet("color:#888; font-size:9px; margin-top:4px;")
+        github_lbl.setStyleSheet("color:#888; font-size:11px; margin-top:4px;")
         layout.addWidget(github_lbl)
 
         github_url = "https://github.com/Nozy82/MicroIPTool"  # <- ide írd be a pontos GitHub URL-t
         link = QLabel(f'<a href="{github_url}" style="color:#4a9eff;">{github_url}</a>')
         link.setAlignment(Qt.AlignmentFlag.AlignCenter)
         link.setOpenExternalLinks(True)
-        link.setStyleSheet("font-size:9px;")
+        link.setStyleSheet("font-size:11px;")
         layout.addWidget(link)
 
         layout.addStretch()
@@ -1700,11 +1700,11 @@ class AboutDialog(QDialog):
     def _apply_style(self):
         self.setStyleSheet("""
             QDialog { background-color:#0f0f1a; color:#cccccc; font-family:'Segoe UI'; }
-            QLabel  { color:#cccccc; font-size:10px; }
+            QLabel  { color:#cccccc; font-size:12px; }
             QPushButton {
                 background-color:#1e3a5f; color:#4a9eff;
                 border:1px solid #4a9eff; border-radius:4px;
-                font-size:10px; padding:4px 16px;
+                font-size:12px; padding:4px 18px;
             }
             QPushButton:hover { background-color:#4a9eff; color:#ffffff; }
         """)
@@ -1741,19 +1741,19 @@ class AdapterCard(QFrame):
             badge = QLabel(f" {t('adapter_badge_virtual')} ")
             badge.setStyleSheet(
                 "background:#3a2a00; color:#ffaa00; border:1px solid #ffaa00;"
-                "border-radius:3px; font-size:8px; padding:1px 4px;"
+                "border-radius:3px; font-size:10px; padding:1px 4px;"
             )
         else:
             badge = QLabel(f" {t('adapter_badge_physical')} ")
             badge.setStyleSheet(
                 "background:#003a1a; color:#00cc66; border:1px solid #00cc66;"
-                "border-radius:3px; font-size:8px; padding:1px 4px;"
+                "border-radius:3px; font-size:10px; padding:1px 4px;"
             )
         header.addWidget(badge)
 
         is_up = a["status"] == "Up"
         self.status_lbl = QLabel(f"  ● {t('adapter_status_up') if is_up else t('adapter_status_down')}")
-        self.status_lbl.setStyleSheet(f"color:{'#4CAF50' if is_up else '#F44336'}; font-size:10px;")
+        self.status_lbl.setStyleSheet(f"color:{'#4CAF50' if is_up else '#F44336'}; font-size:12px;")
         header.addWidget(self.status_lbl)
         layout.addLayout(header)
 
@@ -1773,9 +1773,9 @@ class AdapterCard(QFrame):
             row = QHBoxLayout()
             lbl = QLabel(f"{t(key)}:")
             lbl.setFixedWidth(58)
-            lbl.setStyleSheet("color:#888; font-size:9px;")
+            lbl.setStyleSheet("color:#888; font-size:11px;")
             val = QLabel(value if value else t("adapter_no_ip"))
-            val.setStyleSheet("font-size:9px;")
+            val.setStyleSheet("font-size:11px;")
             val.setWordWrap(True)
             row.addWidget(lbl)
             row.addWidget(val, stretch=1)
@@ -1786,9 +1786,9 @@ class AdapterCard(QFrame):
             row = QHBoxLayout()
             lbl = QLabel(f"{t('adapter_ssid')}:")
             lbl.setFixedWidth(58)
-            lbl.setStyleSheet("color:#888; font-size:9px;")
+            lbl.setStyleSheet("color:#888; font-size:11px;")
             self.ssid_val = QLabel(a["ssid"] if a["ssid"] else t("adapter_no_ssid"))
-            self.ssid_val.setStyleSheet("font-size:9px;")
+            self.ssid_val.setStyleSheet("font-size:11px;")
             row.addWidget(lbl)
             row.addWidget(self.ssid_val, stretch=1)
             layout.addLayout(row)
@@ -1799,7 +1799,7 @@ class AdapterCard(QFrame):
         self.adapter_data["status"] = status
         self.adapter_data["ip"]     = ip if ip else "N/A"
         self.status_lbl.setText(f"  ● {t('adapter_status_up') if is_up else t('adapter_status_down')}")
-        self.status_lbl.setStyleSheet(f"color:{'#4CAF50' if is_up else '#F44336'}; font-size:10px;")
+        self.status_lbl.setStyleSheet(f"color:{'#4CAF50' if is_up else '#F44336'}; font-size:12px;")
         if "adapter_ip" in self._data_labels:
             self._data_labels["adapter_ip"].setText(ip if ip else t("adapter_no_ip"))
 
@@ -1808,18 +1808,18 @@ class AdapterCard(QFrame):
         if a["virtual"]:
             self.setStyleSheet(
                 "AdapterCard { background-color:#2a1f00; border:2px solid #ffaa00;"
-                "border-radius:8px; } QLabel { color:#ffffff; }"
+                "border-radius:10px; } QLabel { color:#ffffff; }"
                 if selected else
                 "AdapterCard { background-color:#1a1a2e; border:1px solid #4a3800;"
-                "border-radius:8px; } QLabel { color:#aaaaaa; }"
+                "border-radius:10px; } QLabel { color:#aaaaaa; }"
             )
         else:
             self.setStyleSheet(
                 "AdapterCard { background-color:#1e3a5f; border:2px solid #4a9eff;"
-                "border-radius:8px; } QLabel { color:#ffffff; }"
+                "border-radius:10px; } QLabel { color:#ffffff; }"
                 if selected else
                 "AdapterCard { background-color:#1a1a2e; border:1px solid #333;"
-                "border-radius:8px; } QLabel { color:#aaaaaa; }"
+                "border-radius:10px; } QLabel { color:#aaaaaa; }"
             )
 
     def set_selected(self, selected):
@@ -1856,9 +1856,9 @@ class AdapterPanel(QWidget):
         self.cb_virtual.setChecked(False)
         self.cb_virtual.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cb_virtual.setStyleSheet("""
-            QCheckBox { color:#888; font-size:9px; }
+            QCheckBox { color:#888; font-size:11px; }
             QCheckBox::indicator {
-                width:13px; height:13px;
+                width:15px; height:15px;
                 border:1px solid #444; border-radius:3px; background:#1a1a2e;
             }
             QCheckBox::indicator:checked { background:#1e3a5f; border:1px solid #4a9eff; }
@@ -1875,7 +1875,7 @@ class AdapterPanel(QWidget):
             QPushButton {
                 background-color:#1a1a2e; color:#4a9eff;
                 border:1px solid #4a9eff; border-radius:4px;
-                font-size:9px; padding:0px 8px;
+                font-size:11px; padding:0px 10px;
             }
             QPushButton:hover { background-color:#1e3a5f; }
         """)
@@ -2091,16 +2091,16 @@ class MainWindow(QMainWindow):
         menubar.setStyleSheet("""
             QMenuBar {
                 background-color:#0d0d1a; color:#aaaaaa;
-                font-family:'Segoe UI'; font-size:10px;
+                font-family:'Segoe UI'; font-size:12px;
                 border-bottom:1px solid #222; padding:2px;
             }
             QMenuBar::item:selected { background-color:#1e3a5f; color:#ffffff; }
             QMenu {
                 background-color:#1a1a2e; color:#cccccc;
-                border:1px solid #333; font-size:10px;
+                border:1px solid #333; font-size:12px;
             }
             QMenu::item:selected { background-color:#1e3a5f; color:#ffffff; }
-            QMenu::separator { height:1px; background:#333; margin:4px 8px; }
+            QMenu::separator { height:1px; background:#333; margin:4px 10px; }
         """)
         file_menu = menubar.addMenu(t("menu_file"))
         exit_act  = QAction(t("menu_file_exit"), self)
@@ -2132,7 +2132,7 @@ class MainWindow(QMainWindow):
 
         self.warning_bar = QLabel("")
         self.warning_bar.setStyleSheet(
-            "background-color:#7a4a00; color:#ffcc00; padding:6px 12px; font-size:10px;"
+            "background-color:#7a4a00; color:#ffcc00; padding:6px 14px; font-size:12px;"
         )
         self.warning_bar.setVisible(False)
         main_layout.addWidget(self.warning_bar)
@@ -2157,8 +2157,8 @@ class MainWindow(QMainWindow):
             QTabWidget::pane { border:none; background:#0f0f1a; }
             QTabBar::tab {
                 background:#1a1a2e; color:#888;
-                padding:10px 24px; border:none;
-                font-size:10px; font-family:'Segoe UI';
+                padding:12px 24px; border:none;
+                font-size:12px; font-family:'Segoe UI';
             }
             QTabBar::tab:selected {
                 background:#0f0f1a; color:#4a9eff; border-bottom:2px solid #4a9eff;
@@ -2185,8 +2185,8 @@ class MainWindow(QMainWindow):
         self.status_bar_label = QLabel()
         self.status_bar_label.setFixedHeight(28)
         self.status_bar_label.setStyleSheet(
-            "background-color:#0d0d1a; color:#555; padding:0px 12px;"
-            "font-size:9px; border-top:1px solid #222;"
+            "background-color:#0d0d1a; color:#555; padding:0px 14px;"
+            "font-size:11px; border-top:1px solid #222;"
         )
         main_layout.addWidget(self.status_bar_label)
 
@@ -2194,7 +2194,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
             QMainWindow, QWidget {
                 background-color:#0f0f1a; color:#cccccc;
-                font-family:'Segoe UI'; font-size:10px;
+                font-family:'Segoe UI'; font-size:12px;
             }
             QScrollBar:vertical { background:#1a1a2e; width:6px; border-radius:3px; }
             QScrollBar::handle:vertical { background:#333; border-radius:3px; }
