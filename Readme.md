@@ -86,7 +86,7 @@ Development is ongoing, and features may change in future versions.
 
 ## 👤 Author
 
-Balázs [Vezetéknév] (Nozy82)
+Balázs Mózes (Nozy82)
 
 ## 🔗 GitHub
 

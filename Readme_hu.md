@@ -86,7 +86,7 @@ A fejlesztés folyamatos, a funkciók a jövőben változhatnak.
 
 ## 👤 Készítő
 
-Balázs [Vezetéknév] (Nozy82)
+Mózes Balázs (Nozy82)
 
 ## 🔗 GitHub
 
