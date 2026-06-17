@@ -1,5 +1,7 @@
 # MicroIPTool
 
+🇭🇺 Hungarian version: [README_HU.md](README_HU.md)
+
 MicroIPTool is a simple graphical network utility for Windows, designed to simplify everyday network configuration and diagnostics.
 
 ## ⚙️ Features
@@ -12,6 +14,7 @@ MicroIPTool is a simple graphical network utility for Windows, designed to simpl
   * Static IP address
 * Ping a specified IP address
 * Basic network scanning (ping sweep)
+* Adjustable application font size
 * Multi-language interface:
 
   * Hungarian
@@ -20,9 +23,9 @@ MicroIPTool is a simple graphical network utility for Windows, designed to simpl
 
 ## 📌 Status
 
-Version: **0.8 (Beta)**
+Version: **1.0.0**
 
-The application is already usable, but still under development. Minor bugs may occur.
+First stable release.
 
 ## 💻 Requirements
 
@@ -51,21 +54,31 @@ Due to the use of PyInstaller, some antivirus engines may report false positives
 The file is safe to use if downloaded from the official GitHub repository.
 
 VirusTotal scan result:
-https://www.virustotal.com/gui/file/751e6c4dd9a5be662119360db8dc70b38086a1c249d8dbc8288ea24b1e7a2469/detection
+https://www.virustotal.com/gui/file/0d0353bc30a0a94dce2248e29d6b5cb0cf0ea136137a5a8d0d4a75ef86616592/detection
 
 ## 📝 Note
 
 This tool was originally created for personal use and later shared publicly.
+
 Development is ongoing, and features may change in future versions.
 
 ## 📄 Changelog
 
-v0.8.1
+### v1.0.0
+
+* Added adjustable font size setting
+* Fixed network scan range handling
+* Fixed IP address field keyboard navigation issue (Shift key no longer moves to the next field)
+* General stability and usability improvements
+
+### v0.8.1
+
 * Improved scan stability
 * Better device detection during scan
 * Increased font size for improved readability
 
-v0.8
+### v0.8
+
 * Initial public release
 * IP configuration
 * Ping functionality
@@ -73,7 +86,7 @@ v0.8
 
 ## 👤 Author
 
-Nozy82
+Balázs [Vezetéknév] (Nozy82)
 
 ## 🔗 GitHub
 

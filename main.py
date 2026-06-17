@@ -1,24 +1,129 @@
 import sys
 import os
+import re
 import socket
 import subprocess
-import re
+import time
+import csv
+import tempfile
+import concurrent.futures
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QFrame, QTabWidget, QScrollArea, QDialog, QPushButton,
-    QCheckBox, QSizePolicy, QSplitter, QLineEdit, QGridLayout
+    QCheckBox, QSizePolicy, QSplitter, QLineEdit, QGridLayout,
+    QFileDialog, QProgressBar
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QAction, QIntValidator
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QFont, QAction, QPixmap, QIcon, QIntValidator
 
-# Admin jog ellenőrzése és újraindítás ha szükséges
+# Admin jog ellenőrzése
 import ctypes
 if not ctypes.windll.shell32.IsUserAnAdmin():
     ctypes.windll.shell32.ShellExecuteW(
         None, "runas", sys.executable, " ".join(sys.argv), None, 1
     )
     sys.exit()
+
+
+# ---------------------------------------------------------------------------
+# Verzió
+# ---------------------------------------------------------------------------
+
+APP_VERSION = "1.0.0"
+
+# ---------------------------------------------------------------------------
+# Betűméret skála – 0.8 (kis) és 1.4 (nagy) között
+# ---------------------------------------------------------------------------
+
+FONT_SCALE     = 1.0
+FONT_SCALE_MIN = 0.8
+FONT_SCALE_MAX = 1.4
+FONT_SCALE_STEP = 0.1
+
+# ---------------------------------------------------------------------------
+# Alap betűméretek – ezekből számol a skála
+# ---------------------------------------------------------------------------
+
+_BASE_FONTS = {
+    "font_tiny":   9,
+    "font_small":  11,
+    "font_normal": 12,
+    "font_large":  13,
+    "font_title":  15,
+}
+
+
+# ---------------------------------------------------------------------------
+# Téma és méret beállítások
+# ---------------------------------------------------------------------------
+
+THEME = {
+    "font_tiny":         9,
+    "font_small":        11,
+    "font_normal":       12,
+    "font_large":        13,
+    "font_title":        15,
+    "color_bg":          "#0f0f1a",
+    "color_bg_card":     "#1a1a2e",
+    "color_bg_input":    "#16213e",
+    "color_bg_dark":     "#0d0d1a",
+    "color_bg_header":   "#1a1a2e",
+    "color_accent":      "#4a9eff",
+    "color_accent_dark": "#1e3a5f",
+    "color_text":        "#cccccc",
+    "color_text_muted":  "#888888",
+    "color_text_dim":    "#555555",
+    "color_ok":          "#4CAF50",
+    "color_error":       "#F44336",
+    "color_warning_bg":  "#7a4a00",
+    "color_warning_fg":  "#ffcc00",
+    "color_virtual_bg":  "#3a2a00",
+    "color_virtual_fg":  "#ffaa00",
+    "color_physical_bg": "#003a1a",
+    "color_physical_fg": "#00cc66",
+    "card_min_height":   210,
+    "octet_width":       48,
+    "octet_height":      30,
+    "btn_height_small":  26,
+    "btn_height_normal": 32,
+    "btn_height_large":  36,
+}
+
+
+def th(key):
+    return THEME.get(key, "")
+
+
+def fs(key):
+    """Betűméret lekérése skálázva."""
+    base = _BASE_FONTS.get(key, THEME.get(key, 10))
+    scaled = max(7, round(base * FONT_SCALE))
+    return f"{scaled}px"
+
+
+def fv(key):
+    """Betűméret lekérése int értékként (pl. QFont-hoz)."""
+    base = _BASE_FONTS.get(key, THEME.get(key, 10))
+    return max(7, round(base * FONT_SCALE))
+
+
+# ---------------------------------------------------------------------------
+# Log rendszer
+# ---------------------------------------------------------------------------
+
+LOG_ENABLED = True
+LOG_PATH    = os.path.join(os.path.expanduser("~"), "Documents", "MicroIPTool.log")
+
+
+def _log(msg):
+    if not LOG_ENABLED:
+        return
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -31,24 +136,6 @@ def asset(filename):
     else:
         base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, "assets", filename)
-
-
-# ---------------------------------------------------------------------------
-# Log rendszer – kikapcsolható
-# ---------------------------------------------------------------------------
-
-LOG_ENABLED = True
-LOG_PATH    = os.path.join(os.path.expanduser("~"), "Documents", "MicroIPTool.log")
-
-def _log(msg):
-    if not LOG_ENABLED:
-        return
-    try:
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            from datetime import datetime
-            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
-    except Exception:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -85,13 +172,11 @@ LANGUAGES = {
         "menu_help":              "Súgó",
         "menu_help_about":        "Névjegy",
         "about_title":            "Névjegy",
-        "about_version":          "Verzió: 0.8.1",
-        "about_author":           "Készítette: Nozy82",
+        "about_version":          f"Verzió: {APP_VERSION}",
+        "about_author":           "Készítette: Mózes Balázs (Nozy82)",
         "about_desc":             "Hálózati eszköz IP beállításhoz, pingeléshez és szkenneléshez.",
         "about_github":           "Forráskód és letöltés:",
         "about_close":            "Bezárás",
-        "placeholder_ping":       "Ping – hamarosan",
-        "placeholder_scan":       "Szkennelés – hamarosan",
         "ip_current_title":       "Jelenlegi beállítások",
         "ip_adapter_name":        "Adapter",
         "ip_desc":                "Leírás",
@@ -133,12 +218,13 @@ LANGUAGES = {
         "scan_col_hostname":      "Név",
         "scan_col_vendor":        "Gyártó",
         "scan_no_adapter":        "Nincs kiválasztott adapter",
-        "scan_running":           "Szkennelés folyamatban... {0}/{1}",
-        "scan_done":              "Szkennelés kész – {0} eszköz találva",
-        "scan_stopped":           "Szkennelés leállítva – {0} eszköz találva",
+        "scan_running":           "Szkennelés... {0}/{1}",
+        "scan_done":              "Kész – {0} eszköz találva",
+        "scan_stopped":           "Leállítva – {0} eszköz találva",
         "scan_export_ok":         "✔  Exportálva: {0}",
         "scan_export_err":        "✖  Export hiba: {0}",
         "scan_no_results":        "Nincs exportálható eredmény",
+        "scan_range_mismatch":    "A tartomány első 3 oktetje nem egyezik",
     },
     "en": {
         "window_title":           "Micro IP Tool",
@@ -169,13 +255,11 @@ LANGUAGES = {
         "menu_help":              "Help",
         "menu_help_about":        "About",
         "about_title":            "About",
-        "about_version":          "Version: 0.8.1",
-        "about_author":           "Created by: Nozy82",
+        "about_version":          f"Version: {APP_VERSION}",
+        "about_author":           "Created by: Mózes Balázs (Nozy82)",
         "about_desc":             "Network tool for IP configuration, ping and scanning.",
         "about_github":           "Source code and download:",
         "about_close":            "Close",
-        "placeholder_ping":       "Ping – coming soon",
-        "placeholder_scan":       "Scan – coming soon",
         "ip_current_title":       "Current settings",
         "ip_adapter_name":        "Adapter",
         "ip_desc":                "Description",
@@ -204,7 +288,7 @@ LANGUAGES = {
         "ping_btn_clear":         "Clear",
         "ping_running":           "Pinging...",
         "ping_no_adapter":        "No adapter selected",
-        "ping_invalid_ip":        "Invalid IP address – only values 0-255 are allowed",
+        "ping_invalid_ip":        "Invalid IP – only values 0-255 are allowed",
         "scan_title":             "Network Scan",
         "scan_range_from":        "Range start",
         "scan_range_to":          "Range end",
@@ -218,11 +302,12 @@ LANGUAGES = {
         "scan_col_vendor":        "Vendor",
         "scan_no_adapter":        "No adapter selected",
         "scan_running":           "Scanning... {0}/{1}",
-        "scan_done":              "Scan complete – {0} devices found",
-        "scan_stopped":           "Scan stopped – {0} devices found",
+        "scan_done":              "Done – {0} devices found",
+        "scan_stopped":           "Stopped – {0} devices found",
         "scan_export_ok":         "✔  Exported: {0}",
         "scan_export_err":        "✖  Export error: {0}",
         "scan_no_results":        "No results to export",
+        "scan_range_mismatch":    "First 3 octets of range must match",
     }
 }
 
@@ -254,7 +339,7 @@ def is_force_virtual(description):
 
 
 # ---------------------------------------------------------------------------
-# Hálózati adatok lekérése – optimalizált, egyetlen PS hívás
+# Hálózati adatok lekérése
 # ---------------------------------------------------------------------------
 
 def get_pc_info():
@@ -269,7 +354,6 @@ def get_pc_info():
     return pc_name, domain
 
 
-# Egyetlen összevont PowerShell parancs – minimális modul betöltés
 _PS_GET_ADAPTERS = (
     "Get-NetAdapter | ForEach-Object {"
     "$i=$_.ifIndex;"
@@ -292,7 +376,6 @@ _PS_GET_ADAPTERS = (
     "}"
 )
 
-# Gyors állapot lekérés – csak IP és státusz, sokkal kisebb PS parancs
 _PS_GET_STATUS = (
     "Get-NetAdapter | ForEach-Object {"
     "$i=$_.ifIndex;"
@@ -303,7 +386,6 @@ _PS_GET_STATUS = (
 
 
 def _run_ps(cmd):
-    """PowerShell parancs futtatása, eredmény soronként."""
     try:
         out = subprocess.check_output(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
@@ -317,7 +399,6 @@ def _run_ps(cmd):
 
 
 def get_network_adapters():
-    """Teljes adapter lekérés – csak induláskor és frissítés gombra."""
     adapters = []
     lines    = _run_ps(_PS_GET_ADAPTERS)
 
@@ -381,7 +462,6 @@ def get_network_adapters():
 
 
 def get_adapter_status():
-    """Gyors állapot lekérés – csak névhez IP és státusz. Háttérfrissítéshez."""
     status_map = {}
     for line in _run_ps(_PS_GET_STATUS):
         parts = line.split('|')
@@ -439,11 +519,44 @@ def check_ip_overlap(adapters):
 
 
 # ---------------------------------------------------------------------------
+# MAC gyártó adatbázis
+# ---------------------------------------------------------------------------
+
+_MAC_DB = {}
+
+
+def load_mac_db():
+    global _MAC_DB
+    db_path = asset("mac_vendors.csv")
+    if not os.path.exists(db_path):
+        return
+    try:
+        with open(db_path, "r", encoding="utf-8", errors="replace") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                prefix = row.get("Mac Prefix", "").strip().upper()
+                vendor = row.get("Vendor Name", "").strip()
+                if prefix and vendor:
+                    _MAC_DB[prefix] = vendor
+    except Exception as e:
+        print(f"MAC adatbázis hiba: {e}")
+
+
+def get_vendor(mac):
+    if not mac or mac in ("N/A", "–"):
+        return "–"
+    clean = re.sub(r'[:\-\.]', '', mac.strip().upper())
+    if len(clean) >= 6:
+        prefix = f"{clean[0:2]}:{clean[2:4]}:{clean[4:6]}"
+        return _MAC_DB.get(prefix, "–")
+    return "–"
+
+
+# ---------------------------------------------------------------------------
 # Háttérszálak
 # ---------------------------------------------------------------------------
 
 class FullRefreshThread(QThread):
-    """Teljes adapter lekérés – induláskor és frissítés gombra."""
     finished = pyqtSignal(list, str, str, str)
 
     def run(self):
@@ -455,12 +568,10 @@ class FullRefreshThread(QThread):
 
 
 class StatusRefreshThread(QThread):
-    """Gyors állapot lekérés – 5 másodpercenként, nem érinti a beviteli mezőket."""
     finished = pyqtSignal(dict)
 
     def run(self):
-        status_map = get_adapter_status()
-        self.finished.emit(status_map)
+        self.finished.emit(get_adapter_status())
 
 
 # ---------------------------------------------------------------------------
@@ -470,57 +581,65 @@ class StatusRefreshThread(QThread):
 class OctetField(QLineEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.next_field = None
-        self.prev_field = None
+        self.next_field    = None
+        self.prev_field    = None
+        self.external_next = None
+        self._error        = False
         self.setMaxLength(3)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setFixedWidth(46)
-        self.setFixedHeight(28)
+        self.setFixedWidth(th("octet_width"))
+        self.setFixedHeight(th("octet_height"))
         self.setValidator(QIntValidator(0, 255, self))
-        self._error = False
         self.textChanged.connect(self._validate)
-        self.setStyleSheet(self._normal_style())
-        self.external_next = None  # Következő sor első mezője
+        self._apply_normal_style()
 
-    def _normal_style(self):
-        return """
-            QLineEdit {
-                background-color: #16213e; color: #ffffff;
-                border: 1px solid #333; border-radius: 4px;
-                font-size: 13px; padding: 2px;
-            }
-            QLineEdit:focus { border: 1px solid #4a9eff; }
-            QLineEdit:disabled {
-                background-color: #0f0f1a; color: #444; border: 1px solid #222;
-            }
-        """
+    def _apply_normal_style(self):
+        self.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {th('color_bg_input')};
+                color: {th('color_text')};
+                border: 1px solid #333;
+                border-radius: 4px;
+                font-size: {fs('font_normal')};
+                padding: 2px;
+            }}
+            QLineEdit:focus {{ border: 1px solid {th('color_accent')}; }}
+            QLineEdit:disabled {{
+                background-color: {th('color_bg')};
+                color: {th('color_text_dim')};
+                border: 1px solid #222;
+            }}
+        """)
 
-    def _error_style(self):
-        return """
-            QLineEdit {
-                background-color: #3a0000; color: #ff6666;
-                border: 1px solid #ff3333; border-radius: 4px;
-                font-size: 13px; padding: 2px;
-            }
-            QLineEdit:focus { border: 1px solid #ff3333; }
-        """
+    def _apply_error_style(self):
+        self.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: #3a0000;
+                color: #ff6666;
+                border: 1px solid {th('color_error')};
+                border-radius: 4px;
+                font-size: {fs('font_normal')};
+                padding: 2px;
+            }}
+            QLineEdit:focus {{ border: 1px solid {th('color_error')}; }}
+        """)
 
     def _validate(self, text):
         if text == "":
             self._error = False
-            self.setStyleSheet(self._normal_style())
+            self._apply_normal_style()
             return
         try:
             val = int(text)
             if 0 <= val <= 255:
                 self._error = False
-                self.setStyleSheet(self._normal_style())
+                self._apply_normal_style()
             else:
                 self._error = True
-                self.setStyleSheet(self._error_style())
+                self._apply_error_style()
         except ValueError:
             self._error = True
-            self.setStyleSheet(self._error_style())
+            self._apply_error_style()
 
     def is_valid(self):
         if self.text() == "":
@@ -531,31 +650,56 @@ class OctetField(QLineEdit):
             return False
 
     def keyPressEvent(self, event):
-        key = event.key()
-        if key in (Qt.Key.Key_Period, Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            if self.next_field:
-                self.next_field.setFocus()
-                self.next_field.selectAll()
-            elif self.external_next:
-                # Ha nincs következő blokk de van külső következő mező
-                self.external_next.setFocus()
-                self.external_next.selectAll()
+        key       = event.key()
+        modifiers = event.modifiers()
+        has_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+
+        # Shift+Tab – visszafele ugrás
+        if key == Qt.Key.Key_Backtab:
+            if self.prev_field:
+                self.prev_field.setFocus()
+                self.prev_field.selectAll()
             return
+
+        # Shift lenyomva – semmilyen ugrás nem történik, normál szövegkezelés
+        if has_shift:
+            super().keyPressEvent(event)
+            return
+
+        # Enter, pont – következő mező
+        if key in (Qt.Key.Key_Period, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            target = self.next_field or self.external_next
+            if target:
+                target.setFocus()
+                target.selectAll()
+            return
+
+        # Tab – következő mező
+        if key == Qt.Key.Key_Tab:
+            target = self.next_field or self.external_next
+            if target:
+                target.setFocus()
+                target.selectAll()
+                return
+
+        # Backspace üres mezőn – előző mező
         if key == Qt.Key.Key_Backspace and self.text() == "" and self.prev_field:
             self.prev_field.setFocus()
             self.prev_field.selectAll()
             return
+
         super().keyPressEvent(event)
+
+        # 3 számjegy után automatikus ugrás
         if len(self.text()) == 3 and key not in (
             Qt.Key.Key_Backspace, Qt.Key.Key_Delete,
-            Qt.Key.Key_Left, Qt.Key.Key_Right
+            Qt.Key.Key_Left, Qt.Key.Key_Right,
+            Qt.Key.Key_Tab
         ):
-            if self.next_field:
-                self.next_field.setFocus()
-                self.next_field.selectAll()
-            elif self.external_next:
-                self.external_next.setFocus()
-                self.external_next.selectAll()
+            target = self.next_field or self.external_next
+            if target:
+                target.setFocus()
+                target.selectAll()
 
 def make_octet_row():
     widget = QWidget()
@@ -570,7 +714,9 @@ def make_octet_row():
         layout.addWidget(f)
         if i < 3:
             dot = QLabel(".")
-            dot.setStyleSheet("color:#666; font-size:14px;")
+            dot.setStyleSheet(
+                f"color:{th('color_text_dim')}; font-size:{fs('font_large')};"
+            )
             dot.setFixedWidth(6)
             layout.addWidget(dot)
     layout.addStretch()
@@ -588,6 +734,20 @@ class IPSettingsTab(QWidget):
         self._static_mode     = False
         self._build_ui()
 
+    def _section_label(self, key):
+        lbl = QLabel(t(key))
+        lbl.setFont(QFont("Segoe UI", fv("font_large"), QFont.Weight.Bold))
+        lbl.setStyleSheet(f"color:{th('color_accent')}; font-size:{fs('font_large')};")
+        return lbl
+
+    def _key_label(self, key):
+        lbl = QLabel(f"{t(key)}:")
+        lbl.setStyleSheet(
+            f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+        )
+        lbl.setFixedWidth(140)
+        return lbl
+
     def _build_ui(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -601,9 +761,13 @@ class IPSettingsTab(QWidget):
         main.addWidget(self._section_label("ip_current_title"))
 
         info_frame = QFrame()
-        info_frame.setStyleSheet(
-            "QFrame { background:#1a1a2e; border:1px solid #2a2a4a; border-radius:10px; }"
-        )
+        info_frame.setStyleSheet(f"""
+            QFrame {{
+                background:{th('color_bg_card')};
+                border:1px solid #2a2a4a;
+                border-radius:8px;
+            }}
+        """)
         info_grid = QGridLayout(info_frame)
         info_grid.setContentsMargins(16, 12, 16, 12)
         info_grid.setVerticalSpacing(6)
@@ -615,11 +779,11 @@ class IPSettingsTab(QWidget):
             "ip_address", "ip_subnet", "ip_gateway",
             "ip_type", "ip_dns",
         ]):
-            lbl = QLabel(f"{t(key)}:")
-            lbl.setStyleSheet("color:#666; font-size:11px;")
-            lbl.setFixedWidth(130)
+            lbl = self._key_label(key)
             val = QLabel("–")
-            val.setStyleSheet("color:#cccccc; font-size:11px;")
+            val.setStyleSheet(
+                f"color:{th('color_text')}; font-size:{fs('font_small')};"
+            )
             val.setWordWrap(True)
             info_grid.addWidget(lbl, i, 0)
             info_grid.addWidget(val, i, 1)
@@ -638,8 +802,8 @@ class IPSettingsTab(QWidget):
         self.btn_dhcp   = QPushButton(t("ip_btn_dhcp"))
         self.btn_static = QPushButton(t("ip_btn_static"))
         for btn in [self.btn_dhcp, self.btn_static]:
-            btn.setFixedHeight(30)
-            btn.setFixedWidth(100)
+            btn.setFixedHeight(th("btn_height_normal"))
+            btn.setFixedWidth(110)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_dhcp.clicked.connect(lambda: self._set_mode(False))
         self.btn_static.clicked.connect(lambda: self._set_mode(True))
@@ -659,9 +823,7 @@ class IPSettingsTab(QWidget):
             ("gw_fields", "ip_new_gateway"),
         ]:
             row = QHBoxLayout()
-            lbl = QLabel(f"{t(key)}:")
-            lbl.setFixedWidth(130)
-            lbl.setStyleSheet("color:#888; font-size:11px;")
+            lbl = self._key_label(key)
             w, fields = make_octet_row()
             setattr(self, attr, fields)
             row.addWidget(lbl)
@@ -669,17 +831,16 @@ class IPSettingsTab(QWidget):
             sl.addLayout(row)
 
         self.ip_fields[0].textChanged.connect(self._auto_subnet)
-        # IP utolsó blokkjáról subnet első blokkjára ugrás Enter/pont esetén
         self.ip_fields[3].external_next = self.sn_fields[0]
-        # Subnet utolsó blokkjáról gateway első blokkjára
         self.sn_fields[3].external_next = self.gw_fields[0]
+
         main.addWidget(self.static_widget)
         self.static_widget.setVisible(False)
 
         apply_row = QHBoxLayout()
         self.btn_apply = QPushButton(t("ip_apply"))
-        self.btn_apply.setFixedHeight(34)
-        self.btn_apply.setFixedWidth(140)
+        self.btn_apply.setFixedHeight(th("btn_height_large"))
+        self.btn_apply.setFixedWidth(150)
         self.btn_apply.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_apply.clicked.connect(self._apply)
         apply_row.addStretch()
@@ -689,7 +850,6 @@ class IPSettingsTab(QWidget):
 
         self.lbl_status = QLabel("")
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_status.setStyleSheet("font-size:11px; padding:4px;")
         self.lbl_status.setVisible(False)
         main.addWidget(self.lbl_status)
 
@@ -700,35 +860,51 @@ class IPSettingsTab(QWidget):
         outer.addWidget(scroll)
         self._update_mode_buttons()
 
-    def _section_label(self, key):
-        lbl = QLabel(t(key))
-        lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        lbl.setStyleSheet("color:#4a9eff; font-size:12px;")
-        return lbl
-
     def _set_mode(self, static):
         self._static_mode = static
         self.static_widget.setVisible(static)
         self._update_mode_buttons()
-        # Automatikus fókusz az első IP mezőre statikus módban
         if static:
             QTimer.singleShot(50, lambda: (
                 self.ip_fields[0].setFocus(),
                 self.ip_fields[0].selectAll()
             ))
-            
+
     def _update_mode_buttons(self):
-        active = (
-            "QPushButton { background-color:#1e3a5f; color:#4a9eff; "
-            "border:1px solid #4a9eff; border-radius:4px; font-size:12px; }"
-        )
-        inactive = (
-            "QPushButton { background-color:#1a1a2e; color:#555; "
-            "border:1px solid #333; border-radius:4px; font-size:12px; } "
-            "QPushButton:hover { color:#aaa; border-color:#555; }"
-        )
+        active = f"""
+            QPushButton {{
+                background-color:{th('color_accent_dark')};
+                color:{th('color_accent')};
+                border:1px solid {th('color_accent')};
+                border-radius:4px;
+                font-size:{fs('font_small')};
+            }}
+        """
+        inactive = f"""
+            QPushButton {{
+                background-color:{th('color_bg_card')};
+                color:{th('color_text_dim')};
+                border:1px solid #333;
+                border-radius:4px;
+                font-size:{fs('font_small')};
+            }}
+            QPushButton:hover {{ color:{th('color_text_muted')}; border-color:#555; }}
+        """
         self.btn_dhcp.setStyleSheet(active if not self._static_mode else inactive)
         self.btn_static.setStyleSheet(active if self._static_mode else inactive)
+        self.btn_apply.setStyleSheet(f"""
+            QPushButton {{
+                background-color:{th('color_accent_dark')};
+                color:{th('color_accent')};
+                border:1px solid {th('color_accent')};
+                border-radius:4px;
+                font-size:{fs('font_small')};
+            }}
+            QPushButton:hover {{
+                background-color:{th('color_accent')};
+                color:#ffffff;
+            }}
+        """)
 
     def _auto_subnet(self, text):
         if not self._static_mode:
@@ -746,7 +922,6 @@ class IPSettingsTab(QWidget):
         self._set_mode(not is_dhcp)
 
     def update_info_only(self, adapter):
-        """Csak az infó panel frissítése – beviteli mezőket nem érinti."""
         self._current_adapter = adapter
         self._show_info(adapter)
 
@@ -800,24 +975,17 @@ class IPSettingsTab(QWidget):
                 gw     = ".".join(f.text() for f in self.gw_fields)
                 prefix = mask_to_prefix(subnet)
 
-                # IP és subnet validáció
-                invalid_fields = []
-                for fields in [self.ip_fields, self.sn_fields]:
-                    for f in fields:
-                        if not f.is_valid():
-                            invalid_fields.append(f)
-
-                if invalid_fields:
-                    invalid_fields[0].setFocus()
-                    invalid_fields[0].selectAll()
+                invalid = [f for f in self.ip_fields + self.sn_fields if not f.is_valid()]
+                if invalid:
+                    invalid[0].setFocus()
+                    invalid[0].selectAll()
                     self._show_status(
                         t("ip_apply_err",
-                        "Érvénytelen érték – csak 0-255 közötti számok megengedettek"),
+                          "Érvénytelen érték – csak 0-255 közötti számok megengedettek"),
                         error=True
                     )
                     return
 
-                # Gateway validáció
                 if all(f.text().strip() for f in self.gw_fields):
                     try:
                         import ipaddress
@@ -826,8 +994,8 @@ class IPSettingsTab(QWidget):
                         if gw_obj not in network:
                             self._show_status(
                                 t("ip_apply_err",
-                                f"Az átjáró ({gw}) nem ugyanazon az alhálózaton van "
-                                f"mint az IP ({ip}/{prefix})"),
+                                  f"Az átjáró ({gw}) nem ugyanazon az alhálózaton van "
+                                  f"mint az IP ({ip}/{prefix})"),
                                 error=True
                             )
                             return
@@ -852,30 +1020,19 @@ class IPSettingsTab(QWidget):
                 )
 
             _log(f"PS parancs: {ps}")
-
-            import tempfile
             script_path = os.path.join(tempfile.gettempdir(), "mipt_apply.ps1")
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(ps)
 
-            _log(f"Script fájl: {script_path}")
-
             result = subprocess.run(
-                [
-                    "powershell", "-NoProfile", "-NonInteractive",
-                    "-ExecutionPolicy", "Bypass",
-                    "-File", script_path
-                ],
+                ["powershell", "-NoProfile", "-NonInteractive",
+                 "-ExecutionPolicy", "Bypass", "-File", script_path],
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                capture_output=True,
-                text=True
+                capture_output=True, text=True
             )
 
             _log(f"Visszatérési kód: {result.returncode}")
-            if result.stderr:
-                _log(f"Hiba kimenet: {result.stderr.strip()}")
-            if result.stdout:
-                _log(f"Kimenet: {result.stdout.strip()}")
+            if result.stderr: _log(f"Hiba: {result.stderr.strip()}")
 
             if result.returncode != 0:
                 err     = result.stderr.strip().splitlines()
@@ -889,8 +1046,10 @@ class IPSettingsTab(QWidget):
             self._show_status(t("ip_apply_err", str(e)), error=True)
 
     def _show_status(self, msg, error=False):
-        color = "#F44336" if error else "#4CAF50"
-        self.lbl_status.setStyleSheet(f"font-size:11px; color:{color}; padding:4px;")
+        color = th("color_error") if error else th("color_ok")
+        self.lbl_status.setStyleSheet(
+            f"font-size:{fs('font_small')}; color:{color}; padding:4px;"
+        )
         self.lbl_status.setText(msg)
         self.lbl_status.setVisible(True)
         QTimer.singleShot(5000, lambda: self.lbl_status.setVisible(False))
@@ -903,13 +1062,25 @@ class IPSettingsTab(QWidget):
             lbl.setText(f"{t(key)}:")
         self._update_mode_buttons()
 
+    def refresh_styles(self):
+        self._update_mode_buttons()
+        for key, (lbl, val) in self._info_labels.items():
+            lbl.setStyleSheet(
+                f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+            )
+            val.setStyleSheet(
+                f"color:{th('color_text')}; font-size:{fs('font_small')};"
+            )
+        self.lbl_status.setStyleSheet(
+            f"font-size:{fs('font_small')}; padding:4px;"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Ping fül
 # ---------------------------------------------------------------------------
 
 class PingThread(QThread):
-    """Háttérszálon futtatja a pinget, soronként küldi az eredményt."""
     output_line = pyqtSignal(str)
     finished    = pyqtSignal()
 
@@ -924,9 +1095,7 @@ class PingThread(QThread):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                text=True,
-                encoding="cp1250",
-                errors="replace"
+                text=True, encoding="cp1250", errors="replace"
             )
             for line in proc.stdout:
                 line = line.rstrip()
@@ -956,74 +1125,84 @@ class PingTab(QWidget):
         main.setContentsMargins(24, 20, 24, 20)
         main.setSpacing(16)
 
-        # Cím
         self.lbl_title = QLabel(t("ping_title"))
-        self.lbl_title.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        self.lbl_title.setStyleSheet("color:#4a9eff; font-size:12px;")
+        self.lbl_title.setFont(QFont("Segoe UI", fv("font_large"), QFont.Weight.Bold))
+        self.lbl_title.setStyleSheet(
+            f"color:{th('color_accent')}; font-size:{fs('font_large')};"
+        )
         main.addWidget(self.lbl_title)
 
-        # IP beviteli sor
         ip_row = QHBoxLayout()
         self.lbl_target = QLabel(f"{t('ping_target')}:")
-        self.lbl_target.setFixedWidth(130)
-        self.lbl_target.setStyleSheet("color:#888; font-size:11px;")
+        self.lbl_target.setFixedWidth(140)
+        self.lbl_target.setStyleSheet(
+            f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+        )
         ip_row.addWidget(self.lbl_target)
-
         self.ip_widget, self.ip_fields = make_octet_row()
         ip_row.addWidget(self.ip_widget)
         ip_row.addStretch()
         main.addLayout(ip_row)
 
-        # Ping gomb
         btn_row = QHBoxLayout()
         self.btn_ping = QPushButton(t("ping_btn_start"))
-        self.btn_ping.setFixedHeight(34)
-        self.btn_ping.setFixedWidth(140)
+        self.btn_ping.setFixedHeight(th("btn_height_large"))
+        self.btn_ping.setFixedWidth(150)
         self.btn_ping.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_ping.setStyleSheet("""
-            QPushButton {
-                background-color:#1e3a5f; color:#4a9eff;
-                border:1px solid #4a9eff; border-radius:4px; font-size:12px;
-            }
-            QPushButton:hover { background-color:#4a9eff; color:#ffffff; }
-            QPushButton:disabled { background-color:#1a1a2e; color:#444; border-color:#333; }
+        self.btn_ping.setStyleSheet(f"""
+            QPushButton {{
+                background-color:{th('color_accent_dark')};
+                color:{th('color_accent')};
+                border:1px solid {th('color_accent')};
+                border-radius:4px;
+                font-size:{fs('font_small')};
+            }}
+            QPushButton:hover {{
+                background-color:{th('color_accent')};
+                color:#ffffff;
+            }}
+            QPushButton:disabled {{
+                background-color:{th('color_bg_card')};
+                color:{th('color_text_dim')};
+                border-color:#333;
+            }}
         """)
         self.btn_ping.clicked.connect(self._start_ping)
         btn_row.addWidget(self.btn_ping)
         btn_row.addStretch()
         main.addLayout(btn_row)
 
-        # Eredmény box
         self.result_box = QLabel("")
-        self.result_box.setStyleSheet("""
-            QLabel {
-                background-color: #0d1117;
-                color: #cccccc;
+        self.result_box.setStyleSheet(f"""
+            QLabel {{
+                background-color: {th('color_bg_dark')};
+                color: {th('color_text')};
                 border: 1px solid #2a2a4a;
                 border-radius: 6px;
                 font-family: 'Consolas', monospace;
-                font-size: 11px;
-                padding: 12px;
-            }
+                font-size: {fs('font_small')};
+                padding: 10px;
+            }}
         """)
         self.result_box.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.result_box.setWordWrap(True)
-        self.result_box.setMinimumHeight(120)
-        self.result_box.setFixedHeight(160)
+        self.result_box.setFixedHeight(170)
         main.addWidget(self.result_box)
 
-        # Törlés gomb
         clear_row = QHBoxLayout()
         self.btn_clear = QPushButton(t("ping_btn_clear"))
-        self.btn_clear.setFixedHeight(26)
-        self.btn_clear.setFixedWidth(80)
+        self.btn_clear.setFixedHeight(th("btn_height_small"))
+        self.btn_clear.setFixedWidth(90)
         self.btn_clear.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_clear.setStyleSheet("""
-            QPushButton {
-                background-color:#1a1a2e; color:#666;
-                border:1px solid #333; border-radius:4px; font-size:11px;
-            }
-            QPushButton:hover { color:#aaa; border-color:#555; }
+        self.btn_clear.setStyleSheet(f"""
+            QPushButton {{
+                background-color:{th('color_bg_card')};
+                color:{th('color_text_dim')};
+                border:1px solid #333;
+                border-radius:4px;
+                font-size:{fs('font_tiny')};
+            }}
+            QPushButton:hover {{ color:{th('color_text_muted')}; border-color:#555; }}
         """)
         self.btn_clear.clicked.connect(self._clear)
         clear_row.addWidget(self.btn_clear)
@@ -1032,19 +1211,16 @@ class PingTab(QWidget):
 
         main.addStretch()
         scroll.setWidget(content)
-
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
 
     def load_adapter(self, adapter):
-        """Betölti a kiválasztott adapter IP-jét a ping mezőkbe."""
         self._current_adapter = adapter
         ip = adapter.get("ip", "")
         if ip and ip != "N/A":
             parts = ip.split(".")
             if len(parts) == 4:
-                # Csak az első 3 oktet töltődik be, az utolsó üres marad
                 for i in range(3):
                     self.ip_fields[i].setText(parts[i])
                 self.ip_fields[3].setText("")
@@ -1058,22 +1234,15 @@ class PingTab(QWidget):
         if not self._current_adapter:
             self.result_box.setText(t("ping_no_adapter"))
             return
-
-        # Validáció
         invalid = [f for f in self.ip_fields if not f.is_valid()]
         if invalid:
             invalid[0].setFocus()
             invalid[0].selectAll()
             self.result_box.setText(t("ping_invalid_ip"))
             return
-
         ip = ".".join(f.text() for f in self.ip_fields)
-
-        # Box törlése és gomb letiltása
         self.result_box.setText(t("ping_running"))
         self.btn_ping.setEnabled(False)
-
-        # Ping thread indítása
         self._ping_thread = PingThread(ip)
         self._ping_thread.output_line.connect(self._on_line)
         self._ping_thread.finished.connect(self._on_done)
@@ -1095,53 +1264,59 @@ class PingTab(QWidget):
         self.btn_ping.setText(t("ping_btn_start"))
         self.btn_clear.setText(t("ping_btn_clear"))
 
-# ---------------------------------------------------------------------------
-# MAC gyártó adatbázis betöltése
-# ---------------------------------------------------------------------------
-
-_MAC_DB = {}
-
-def load_mac_db():
-    """Betölti a MAC gyártó adatbázist."""
-    global _MAC_DB
-    db_path = asset("mac_vendors.csv")
-    if not os.path.exists(db_path):
-        print(f"MAC adatbázis nem található: {db_path}")
-        return
-    try:
-        import csv
-        with open(db_path, "r", encoding="utf-8", errors="replace") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                prefix = row.get("Mac Prefix", "").strip().upper()
-                vendor = row.get("Vendor Name", "").strip()
-                if prefix and vendor:
-                    _MAC_DB[prefix] = vendor
-        print(f"MAC adatbázis betöltve: {len(_MAC_DB)} gyártó")
-    except Exception as e:
-        print(f"MAC adatbázis hiba: {e}")
-
-
-def get_vendor(mac):
-    """MAC cím alapján gyártó lekérése."""
-    if not mac or mac == "N/A":
-        return "–"
-    # Egységesítés AA:BB:CC formátumra
-    clean = re.sub(r'[:\-\.]', '', mac.strip().upper())
-    if len(clean) >= 6:
-        prefix = f"{clean[0:2]}:{clean[2:4]}:{clean[4:6]}"
-        return _MAC_DB.get(prefix, "–")
-    return "–"
-
+    def refresh_styles(self):
+        self.lbl_title.setFont(QFont("Segoe UI", fv("font_large"), QFont.Weight.Bold))
+        self.lbl_title.setStyleSheet(
+            f"color:{th('color_accent')}; font-size:{fs('font_large')};"
+        )
+        self.lbl_target.setStyleSheet(
+            f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+        )
+        self.btn_ping.setStyleSheet(f"""
+            QPushButton {{
+                background-color:{th('color_accent_dark')};
+                color:{th('color_accent')};
+                border:1px solid {th('color_accent')};
+                border-radius:4px;
+                font-size:{fs('font_small')};
+            }}
+            QPushButton:hover {{ background-color:{th('color_accent')}; color:#ffffff; }}
+            QPushButton:disabled {{
+                background-color:{th('color_bg_card')};
+                color:{th('color_text_dim')};
+                border-color:#333;
+            }}
+        """)
+        self.result_box.setStyleSheet(f"""
+            QLabel {{
+                background-color: {th('color_bg_dark')};
+                color: {th('color_text')};
+                border: 1px solid #2a2a4a;
+                border-radius: 6px;
+                font-family: 'Consolas', monospace;
+                font-size: {fs('font_small')};
+                padding: 10px;
+            }}
+        """)
+        self.btn_clear.setStyleSheet(f"""
+            QPushButton {{
+                background-color:{th('color_bg_card')};
+                color:{th('color_text_dim')};
+                border:1px solid #333;
+                border-radius:4px;
+                font-size:{fs('font_tiny')};
+            }}
+            QPushButton:hover {{ color:{th('color_text_muted')}; border-color:#555; }}
+        """)
 
 # ---------------------------------------------------------------------------
 # Scan háttérszál
 # ---------------------------------------------------------------------------
 
 class ScanThread(QThread):
-    result_found = pyqtSignal(dict)   # Egy találat
-    progress     = pyqtSignal(int, int)  # aktuális, összes
-    finished     = pyqtSignal(int)    # találatok száma
+    result_found = pyqtSignal(dict)
+    progress     = pyqtSignal(int, int)
+    finished     = pyqtSignal(int)
 
     def __init__(self, base_ip, start_ip, end_ip, max_workers=25):
         super().__init__()
@@ -1155,35 +1330,35 @@ class ScanThread(QThread):
         self._stop = True
 
     def run(self):
-        import concurrent.futures
-
         total   = self.end_ip - self.start_ip + 1
-        targets = [f"{self.base_ip}.{i}" for i in range(self.start_ip, self.end_ip + 1)]
-        done    = 0
-        found   = 0
+        targets = [
+            f"{self.base_ip}.{i}"
+            for i in range(self.start_ip, self.end_ip + 1)
+        ]
+        done  = 0
+        found = 0
 
-        # Saját IP-MAC párok előre lekérése
         own_mac_map = {}
         try:
             ps_out = subprocess.check_output(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                "Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | "
-                "ForEach-Object { $idx=$_.InterfaceIndex; $ip=$_.IPAddress; "
-                "$mac=(Get-NetAdapter | Where-Object {$_.ifIndex -eq $idx}).MacAddress; "
-                "Write-Output ($ip+'|'+$mac) }"],
+                 "Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | "
+                 "ForEach-Object { $idx=$_.InterfaceIndex; $ip=$_.IPAddress; "
+                 "$mac=(Get-NetAdapter | Where-Object {$_.ifIndex -eq $idx}).MacAddress; "
+                 "Write-Output ($ip+'|'+$mac) }"],
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                stderr=subprocess.DEVNULL,
-                timeout=5
+                stderr=subprocess.DEVNULL, timeout=5
             ).decode("cp1250", errors="replace")
             for line in ps_out.splitlines():
                 parts = line.strip().split("|")
                 if len(parts) == 2 and parts[1].strip():
-                    own_mac_map[parts[0].strip()] = parts[1].strip().upper().replace("-", ":")
+                    own_mac_map[parts[0].strip()] = (
+                        parts[1].strip().upper().replace("-", ":")
+                    )
         except Exception:
             pass
 
         def check_host(ip):
-            # Ping
             try:
                 result = subprocess.run(
                     ["ping", "-n", "1", "-w", "500", ip],
@@ -1195,40 +1370,33 @@ class ScanThread(QThread):
             except Exception:
                 return None
 
-            # Kis várakozás hogy az ARP cache feltöltődjön
-            import time
             time.sleep(0.2)
 
             mac    = "–"
             vendor = "–"
 
-            # Saját gép MAC-ja
             if ip in own_mac_map:
                 mac    = own_mac_map[ip]
                 vendor = get_vendor(mac)
             else:
-                # ARP tábla – 3 próbálkozás
-                for attempt in range(3):
+                for _ in range(3):
                     try:
                         arp_out = subprocess.check_output(
-                            ["arp", "-a"],  # Teljes ARP tábla, nem csak egy IP
+                            ["arp", "-a"],
                             creationflags=subprocess.CREATE_NO_WINDOW,
-                            stderr=subprocess.DEVNULL,
-                            timeout=2
+                            stderr=subprocess.DEVNULL, timeout=2
                         ).decode("cp1250", errors="replace")
 
                         for line in arp_out.splitlines():
-                            # Rugalmasabb IP keresés a sorban
-                            if ip in line and re.search(
-                                r'([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}', line
-                            ):
+                            if ip in line:
                                 match = re.search(
-                                    r'([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}', line
+                                    r'([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}',
+                                    line
                                 )
                                 if match:
                                     mac    = match.group(0).upper().replace("-", ":")
                                     vendor = get_vendor(mac)
-                                    break
+                                break
 
                         if mac != "–":
                             break
@@ -1236,7 +1404,6 @@ class ScanThread(QThread):
                     except Exception:
                         break
 
-            # Hostname
             hostname = ip
             try:
                 hostname = socket.gethostbyaddr(ip)[0]
@@ -1245,7 +1412,9 @@ class ScanThread(QThread):
 
             return {"ip": ip, "mac": mac, "hostname": hostname, "vendor": vendor}
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.max_workers
+        ) as executor:
             futures = {executor.submit(check_host, ip): ip for ip in targets}
 
             for future in concurrent.futures.as_completed(futures):
@@ -1264,8 +1433,9 @@ class ScanThread(QThread):
 
         self.finished.emit(found)
 
+
 # ---------------------------------------------------------------------------
-# Rendezhető táblázat sor
+# Scan eredmény táblázat
 # ---------------------------------------------------------------------------
 
 class ScanResultTable(QWidget):
@@ -1285,20 +1455,19 @@ class ScanResultTable(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Fejléc splitter
         self._header_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._header_splitter.setFixedHeight(28)
-        self._header_splitter.setStyleSheet("""
-            QSplitter::handle {
+        self._header_splitter.setFixedHeight(30)
+        self._header_splitter.setStyleSheet(f"""
+            QSplitter::handle {{
                 background-color: #2a2a4a;
                 width: 3px;
-            }
-            QSplitter::handle:hover {
-                background-color: #4a9eff;
-            }
+            }}
+            QSplitter::handle:hover {{
+                background-color: {th('color_accent')};
+            }}
         """)
         self._header_splitter.setChildrenCollapsible(False)
-        self._header_splitter.splitterMoved.connect(self._on_splitter_moved)
+        self._header_splitter.splitterMoved.connect(self._redraw)
 
         self._header_btns = []
         for i, key in enumerate(self.COLS):
@@ -1307,18 +1476,18 @@ class ScanResultTable(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setMinimumWidth(60)
             btn.clicked.connect(lambda _, col=i: self._sort_by(col))
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #1a1a2e;
-                    color: #4a9eff;
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {th('color_bg_header')};
+                    color: {th('color_accent')};
                     border: none;
                     border-bottom: 1px solid #2a2a4a;
-                    font-size: 11px;
+                    font-size: {fs('font_small')};
                     font-weight: bold;
-                    padding: 0 10px;
+                    padding: 0 8px;
                     text-align: left;
-                }
-                QPushButton:hover { background-color: #16213e; }
+                }}
+                QPushButton:hover {{ background-color: #16213e; }}
             """)
             self._header_splitter.addWidget(btn)
             self._header_btns.append(btn)
@@ -1326,11 +1495,9 @@ class ScanResultTable(QWidget):
         self._header_splitter.setSizes(self.WIDTHS)
         layout.addWidget(self._header_splitter)
 
-        # Sorok scroll area
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setStyleSheet("QScrollArea { border:none; background:transparent; }")
-        self.scroll.horizontalScrollBar().setVisible(False)
 
         self.rows_widget = QWidget()
         self.rows_layout = QVBoxLayout(self.rows_widget)
@@ -1339,13 +1506,6 @@ class ScanResultTable(QWidget):
         self.rows_layout.addStretch()
         self.scroll.setWidget(self.rows_widget)
         layout.addWidget(self.scroll, stretch=1)
-
-    def _on_splitter_moved(self, pos, index):
-        """Fejléc splitter mozgatásakor frissíti a sorokat."""
-        self._redraw()
-
-    def _get_col_widths(self):
-        return self._header_splitter.sizes()
 
     def _sort_by(self, col):
         if self._sort_col == col:
@@ -1374,7 +1534,7 @@ class ScanResultTable(QWidget):
     def get_rows(self):
         return self._rows
 
-    def _redraw(self):
+    def _redraw(self, *args):
         while self.rows_layout.count() > 1:
             item = self.rows_layout.takeAt(0)
             if item.widget():
@@ -1391,11 +1551,11 @@ class ScanResultTable(QWidget):
                     return (0, 0, 0, 0)
             return val
 
-        rows      = sorted(self._rows, key=sort_key, reverse=not self._sort_asc)
-        col_widths = self._get_col_widths()
+        rows       = sorted(self._rows, key=sort_key, reverse=not self._sort_asc)
+        col_widths = self._header_splitter.sizes()
 
         for i, row in enumerate(rows):
-            bg         = "#0f0f1a" if i % 2 == 0 else "#13131f"
+            bg         = th("color_bg") if i % 2 == 0 else "#13131f"
             row_widget = QWidget()
             row_widget.setStyleSheet(f"background:{bg};")
             row_layout = QHBoxLayout(row_widget)
@@ -1406,8 +1566,8 @@ class ScanResultTable(QWidget):
                 lbl = QLabel(row.get(field, "–"))
                 lbl.setFixedWidth(col_widths[j] if j < len(col_widths) else 120)
                 lbl.setStyleSheet(
-                    "color:#cccccc; font-size:11px; padding:2px 10px;"
-                    "border-right:1px solid #1a1a2e;"
+                    f"color:{th('color_text')}; font-size:{fs('font_small')};"
+                    f"padding:2px 8px; border-right:1px solid #1a1a2e;"
                 )
                 if field in ("vendor", "hostname"):
                     lbl.setWordWrap(True)
@@ -1430,7 +1590,22 @@ class ScanTab(QWidget):
         super().__init__(parent)
         self._current_adapter = None
         self._scan_thread     = None
+        self._total           = 0
         self._build_ui()
+
+    def _btn_style(self, color):
+        return f"""
+            QPushButton {{
+                background-color:{th('color_bg_card')};
+                color:{color};
+                border:1px solid {color};
+                border-radius:4px;
+                font-size:{fs('font_small')};
+                padding: 0 12px;
+            }}
+            QPushButton:hover {{ background-color:#16213e; }}
+            QPushButton:disabled {{ color:#333; border-color:#333; }}
+        """
 
     def _build_ui(self):
         main = QVBoxLayout(self)
@@ -1439,57 +1614,49 @@ class ScanTab(QWidget):
 
         # Cím
         self.lbl_title = QLabel(t("scan_title"))
-        self.lbl_title.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        self.lbl_title.setStyleSheet("color:#4a9eff; font-size:12px;")
+        self.lbl_title.setFont(QFont("Segoe UI", fv("font_large"), QFont.Weight.Bold))
+        self.lbl_title.setStyleSheet(
+            f"color:{th('color_accent')}; font-size:{fs('font_large')};"
+        )
         main.addWidget(self.lbl_title)
 
         # Tartomány sor
         range_row = QHBoxLayout()
-
         self.lbl_from = QLabel(f"{t('scan_range_from')}:")
-        self.lbl_from.setStyleSheet("color:#888; font-size:11px;")
-        self.lbl_from.setFixedWidth(110)
+        self.lbl_from.setStyleSheet(
+            f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+        )
+        self.lbl_from.setFixedWidth(130)
         range_row.addWidget(self.lbl_from)
-
         self.from_widget, self.from_fields = make_octet_row()
         range_row.addWidget(self.from_widget)
-
         range_row.addSpacing(16)
-
         self.lbl_to = QLabel(f"{t('scan_range_to')}:")
-        self.lbl_to.setStyleSheet("color:#888; font-size:11px;")
-        self.lbl_to.setFixedWidth(110)
+        self.lbl_to.setStyleSheet(
+            f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+        )
+        self.lbl_to.setFixedWidth(130)
         range_row.addWidget(self.lbl_to)
-
         self.to_widget, self.to_fields = make_octet_row()
         range_row.addWidget(self.to_widget)
         range_row.addStretch()
         main.addLayout(range_row)
 
-        # Gombok
+        # Gomb sor
         btn_row = QHBoxLayout()
-        self.btn_start = QPushButton(t("scan_btn_start"))
-        self.btn_stop  = QPushButton(t("scan_btn_stop"))
+        self.btn_start  = QPushButton(t("scan_btn_start"))
+        self.btn_stop   = QPushButton(t("scan_btn_stop"))
         self.btn_export = QPushButton(t("scan_btn_export"))
         self.btn_clear  = QPushButton(t("scan_btn_clear"))
 
-        for btn, color in [
-            (self.btn_start,  "#4a9eff"),
-            (self.btn_stop,   "#F44336"),
-            (self.btn_export, "#4CAF50"),
-            (self.btn_clear,  "#555"),
-        ]:
-            btn.setFixedHeight(30)
+        self.btn_start.setStyleSheet(self._btn_style(th("color_accent")))
+        self.btn_stop.setStyleSheet(self._btn_style(th("color_error")))
+        self.btn_export.setStyleSheet(self._btn_style(th("color_ok")))
+        self.btn_clear.setStyleSheet(self._btn_style(th("color_text_muted")))
+
+        for btn in [self.btn_start, self.btn_stop, self.btn_export, self.btn_clear]:
+            btn.setFixedHeight(th("btn_height_normal"))
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color:#1a1a2e; color:{color};
-                    border:1px solid {color}; border-radius:4px; font-size:11px;
-                    padding: 0 14px;
-                }}
-                QPushButton:hover {{ background-color:#16213e; }}
-                QPushButton:disabled {{ color:#333; border-color:#333; }}
-            """)
 
         self.btn_start.clicked.connect(self._start_scan)
         self.btn_stop.clicked.connect(self._stop_scan)
@@ -1507,8 +1674,28 @@ class ScanTab(QWidget):
 
         # Státusz sor
         self.lbl_status = QLabel("")
-        self.lbl_status.setStyleSheet("color:#888; font-size:11px;")
+        self.lbl_status.setStyleSheet(
+            f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+        )
         main.addWidget(self.lbl_status)
+
+        # Progress bar – szolíd, vékony, igazodik a táblázat szélességéhez
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(6)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {th('color_bg_card')};
+                border: none;
+                border-radius: 3px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {th('color_accent')};
+                border-radius: 3px;
+            }}
+        """)
+        main.addWidget(self.progress_bar)
 
         # Eredmény táblázat
         self.table = ScanResultTable()
@@ -1520,11 +1707,9 @@ class ScanTab(QWidget):
         if ip and ip != "N/A":
             parts = ip.split(".")
             if len(parts) == 4:
-                # Első 3 oktet mindkét sorba
                 for i in range(3):
                     self.from_fields[i].setText(parts[i])
                     self.to_fields[i].setText(parts[i])
-                # Alapértelmezett tartomány: 1-254
                 self.from_fields[3].setText("1")
                 self.to_fields[3].setText("254")
 
@@ -1533,7 +1718,6 @@ class ScanTab(QWidget):
             self.lbl_status.setText(t("scan_no_adapter"))
             return
 
-        # Validáció
         for fields in [self.from_fields, self.to_fields]:
             invalid = [f for f in fields if not f.is_valid()]
             if invalid:
@@ -1541,7 +1725,14 @@ class ScanTab(QWidget):
                 invalid[0].selectAll()
                 return
 
-        base_ip = ".".join(f.text() for f in self.from_fields[:3])
+        from_base = ".".join(f.text() for f in self.from_fields[:3])
+        to_base   = ".".join(f.text() for f in self.to_fields[:3])
+
+        if from_base != to_base:
+            self.lbl_status.setText(t("scan_range_mismatch"))
+            return
+
+        base_ip = from_base
         start   = int(self.from_fields[3].text())
         end     = int(self.to_fields[3].text())
 
@@ -1549,8 +1740,11 @@ class ScanTab(QWidget):
             self.from_fields[3].setFocus()
             return
 
+        self._total = end - start + 1
         self.table.clear()
-        self.lbl_status.setText(t("scan_running", 0, end - start + 1))
+        self.progress_bar.setValue(0)
+        self.progress_bar.setMaximum(self._total)
+        self.lbl_status.setText(t("scan_running", 0, self._total))
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
 
@@ -1568,19 +1762,24 @@ class ScanTab(QWidget):
         self.table.add_row(data)
 
     def _on_progress(self, done, total):
+        self.progress_bar.setValue(done)
         self.lbl_status.setText(t("scan_running", done, total))
 
     def _on_done(self, found):
+        self.progress_bar.setValue(self._total)
         stopped = self._scan_thread and self._scan_thread._stop
         self.lbl_status.setText(
             t("scan_stopped", found) if stopped else t("scan_done", found)
         )
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
+        # Progress bar visszaállítása pár másodperc után
+        QTimer.singleShot(3000, lambda: self.progress_bar.setValue(0))
 
     def _clear(self):
         self.table.clear()
         self.lbl_status.setText("")
+        self.progress_bar.setValue(0)
 
     def _export(self):
         rows = self.table.get_rows()
@@ -1588,39 +1787,25 @@ class ScanTab(QWidget):
             self.lbl_status.setText(t("scan_no_results"))
             return
 
-        from datetime import datetime
-        from PyQt6.QtWidgets import QFileDialog
-
         date_str     = datetime.now().strftime("%Y-%m-%d_%H-%M")
         default_name = f"scan_{date_str}.csv"
         documents    = os.path.join(os.path.expanduser("~"), "Documents")
         default_path = os.path.join(documents, default_name)
 
         filepath, _ = QFileDialog.getSaveFileName(
-            self,
-            t("scan_btn_export"),
-            default_path,
-            "CSV fájl (*.csv)"
+            self, t("scan_btn_export"), default_path, "CSV fájl (*.csv)"
         )
-
         if not filepath:
-            return  # Felhasználó megszakította
+            return
 
         try:
-            import csv as csv_module
             with open(filepath, "w", encoding="utf-8", newline="") as f:
-                writer = csv_module.writer(f)
+                writer = csv.writer(f)
                 writer.writerow(["IP Address", "MAC Address", "Hostname", "Vendor"])
-#                writer.writerow([
-#                    t("scan_col_ip"), t("scan_col_mac"),
-#                    t("scan_col_hostname"), t("scan_col_vendor")
-#                ])
                 for row in rows:
                     writer.writerow([
-                        row.get("ip", ""),
-                        row.get("mac", ""),
-                        row.get("hostname", ""),
-                        row.get("vendor", ""),
+                        row.get("ip", ""), row.get("mac", ""),
+                        row.get("hostname", ""), row.get("vendor", ""),
                     ])
             self.lbl_status.setText(t("scan_export_ok", filepath))
         except Exception as e:
@@ -1636,6 +1821,42 @@ class ScanTab(QWidget):
         self.btn_clear.setText(t("scan_btn_clear"))
         self.table.update_texts()
 
+    def refresh_styles(self):
+        self.lbl_title.setFont(QFont("Segoe UI", fv("font_large"), QFont.Weight.Bold))
+        self.lbl_title.setStyleSheet(
+            f"color:{th('color_accent')}; font-size:{fs('font_large')};"
+        )
+        self.lbl_from.setStyleSheet(
+            f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+        )
+        self.lbl_to.setStyleSheet(
+            f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+        )
+        self.lbl_status.setStyleSheet(
+            f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+        )
+        self.btn_start.setStyleSheet(self._btn_style(th("color_accent")))
+        self.btn_stop.setStyleSheet(self._btn_style(th("color_error")))
+        self.btn_export.setStyleSheet(self._btn_style(th("color_ok")))
+        self.btn_clear.setStyleSheet(self._btn_style(th("color_text_muted")))
+        # Táblázat fejléc és sorok újrarajzolása
+        self.table._refresh_header_labels()
+        for btn in self.table._header_btns:
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {th('color_bg_header')};
+                    color: {th('color_accent')};
+                    border: none;
+                    border-bottom: 1px solid #2a2a4a;
+                    font-size: {fs('font_small')};
+                    font-weight: bold;
+                    padding: 0 8px;
+                    text-align: left;
+                }}
+                QPushButton:hover {{ background-color: #16213e; }}
+            """)
+        self.table._redraw()
+
 # ---------------------------------------------------------------------------
 # Névjegy ablak
 # ---------------------------------------------------------------------------
@@ -1644,7 +1865,7 @@ class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(t("about_title"))
-        self.setFixedSize(360, 260)
+        self.setFixedSize(380, 280)
         self.setModal(True)
         self._build_ui()
         self._apply_style()
@@ -1654,59 +1875,72 @@ class AboutDialog(QDialog):
         layout.setContentsMargins(28, 24, 28, 20)
         layout.setSpacing(10)
 
-        # Program neve
         title = QLabel(t("window_title"))
-        title.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        title.setFont(QFont("Segoe UI", fv("font_title"), QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("color:#4a9eff;")
+        title.setStyleSheet(f"color:{th('color_accent')};")
         layout.addWidget(title)
 
-        # Elválasztó
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet("color:#2a2a4a;")
         layout.addWidget(sep)
 
-        # Verzió és szerző
         for key in ["about_version", "about_author", "about_desc"]:
             lbl = QLabel(t(key))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setWordWrap(True)
-            lbl.setStyleSheet("color:#aaaaaa; font-size:12px;")
+            lbl.setStyleSheet(
+                f"color:{th('color_text_muted')}; font-size:{fs('font_small')};"
+            )
             layout.addWidget(lbl)
 
-        # GitHub link
         github_lbl = QLabel(t("about_github"))
         github_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        github_lbl.setStyleSheet("color:#888; font-size:11px; margin-top:4px;")
+        github_lbl.setStyleSheet(
+            f"color:{th('color_text_dim')}; font-size:{fs('font_tiny')}; margin-top:4px;"
+        )
         layout.addWidget(github_lbl)
 
-        github_url = "https://github.com/Nozy82/MicroIPTool"  # <- ide írd be a pontos GitHub URL-t
-        link = QLabel(f'<a href="{github_url}" style="color:#4a9eff;">{github_url}</a>')
+        github_url = "https://github.com/Nozy82/MicroIPTool"  # <- ide írd be a pontos URL-t
+        link = QLabel(
+            f'<a href="{github_url}" style="color:{th("color_accent")};">{github_url}</a>'
+        )
         link.setAlignment(Qt.AlignmentFlag.AlignCenter)
         link.setOpenExternalLinks(True)
-        link.setStyleSheet("font-size:11px;")
+        link.setStyleSheet(f"font-size:{fs('font_tiny')};")
         layout.addWidget(link)
 
         layout.addStretch()
 
-        # Bezárás gomb
         btn = QPushButton(t("about_close"))
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.clicked.connect(self.close)
-        btn.setFixedHeight(32)
+        btn.setFixedHeight(th("btn_height_normal"))
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color:{th('color_accent_dark')};
+                color:{th('color_accent')};
+                border:1px solid {th('color_accent')};
+                border-radius:4px;
+                font-size:{fs('font_small')};
+                padding:4px 16px;
+            }}
+            QPushButton:hover {{
+                background-color:{th('color_accent')};
+                color:#ffffff;
+            }}
+        """)
         layout.addWidget(btn)
 
     def _apply_style(self):
-        self.setStyleSheet("""
-            QDialog { background-color:#0f0f1a; color:#cccccc; font-family:'Segoe UI'; }
-            QLabel  { color:#cccccc; font-size:12px; }
-            QPushButton {
-                background-color:#1e3a5f; color:#4a9eff;
-                border:1px solid #4a9eff; border-radius:4px;
-                font-size:12px; padding:4px 18px;
-            }
-            QPushButton:hover { background-color:#4a9eff; color:#ffffff; }
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color:{th('color_bg')};
+                color:{th('color_text')};
+                font-family:'Segoe UI';
+            }}
+            QLabel {{ color:{th('color_text')}; font-size:{fs('font_small')}; }}
         """)
 
 
@@ -1727,33 +1961,47 @@ class AdapterCard(QFrame):
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(3)
+        layout.setSpacing(4)
+
         a = self.adapter_data
 
         header   = QHBoxLayout()
         icon     = {"WiFi": "📶", "Ethernet": "🔌"}.get(a["type"], "🖧")
         name_lbl = QLabel(f"{icon}  {a['name']}")
-        name_lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        name_lbl.setFont(QFont("Segoe UI", fv("font_normal"), QFont.Weight.Bold))
         name_lbl.setWordWrap(True)
         header.addWidget(name_lbl, stretch=1)
 
         if a["virtual"]:
             badge = QLabel(f" {t('adapter_badge_virtual')} ")
-            badge.setStyleSheet(
-                "background:#3a2a00; color:#ffaa00; border:1px solid #ffaa00;"
-                "border-radius:3px; font-size:10px; padding:1px 4px;"
-            )
+            badge.setStyleSheet(f"""
+                background:{th('color_virtual_bg')};
+                color:{th('color_virtual_fg')};
+                border:1px solid {th('color_virtual_fg')};
+                border-radius:3px;
+                font-size:{fs('font_tiny')};
+                padding:1px 4px;
+            """)
         else:
             badge = QLabel(f" {t('adapter_badge_physical')} ")
-            badge.setStyleSheet(
-                "background:#003a1a; color:#00cc66; border:1px solid #00cc66;"
-                "border-radius:3px; font-size:10px; padding:1px 4px;"
-            )
+            badge.setStyleSheet(f"""
+                background:{th('color_physical_bg')};
+                color:{th('color_physical_fg')};
+                border:1px solid {th('color_physical_fg')};
+                border-radius:3px;
+                font-size:{fs('font_tiny')};
+                padding:1px 4px;
+            """)
         header.addWidget(badge)
 
         is_up = a["status"] == "Up"
-        self.status_lbl = QLabel(f"  ● {t('adapter_status_up') if is_up else t('adapter_status_down')}")
-        self.status_lbl.setStyleSheet(f"color:{'#4CAF50' if is_up else '#F44336'}; font-size:12px;")
+        self.status_lbl = QLabel(
+            f"  ● {t('adapter_status_up') if is_up else t('adapter_status_down')}"
+        )
+        self.status_lbl.setStyleSheet(
+            f"color:{th('color_ok') if is_up else th('color_error')};"
+            f"font-size:{fs('font_small')};"
+        )
         header.addWidget(self.status_lbl)
         layout.addLayout(header)
 
@@ -1772,10 +2020,12 @@ class AdapterCard(QFrame):
         ]:
             row = QHBoxLayout()
             lbl = QLabel(f"{t(key)}:")
-            lbl.setFixedWidth(58)
-            lbl.setStyleSheet("color:#888; font-size:11px;")
+            lbl.setFixedWidth(60)
+            lbl.setStyleSheet(
+                f"color:{th('color_text_muted')}; font-size:{fs('font_tiny')};"
+            )
             val = QLabel(value if value else t("adapter_no_ip"))
-            val.setStyleSheet("font-size:11px;")
+            val.setStyleSheet(f"font-size:{fs('font_tiny')};")
             val.setWordWrap(True)
             row.addWidget(lbl)
             row.addWidget(val, stretch=1)
@@ -1785,21 +2035,27 @@ class AdapterCard(QFrame):
         if a["type"] == "WiFi":
             row = QHBoxLayout()
             lbl = QLabel(f"{t('adapter_ssid')}:")
-            lbl.setFixedWidth(58)
-            lbl.setStyleSheet("color:#888; font-size:11px;")
+            lbl.setFixedWidth(60)
+            lbl.setStyleSheet(
+                f"color:{th('color_text_muted')}; font-size:{fs('font_tiny')};"
+            )
             self.ssid_val = QLabel(a["ssid"] if a["ssid"] else t("adapter_no_ssid"))
-            self.ssid_val.setStyleSheet("font-size:11px;")
+            self.ssid_val.setStyleSheet(f"font-size:{fs('font_tiny')};")
             row.addWidget(lbl)
             row.addWidget(self.ssid_val, stretch=1)
             layout.addLayout(row)
 
     def update_status(self, status, ip):
-        """Csak a státuszt és IP-t frissíti, nem építi újra a kártyát."""
         is_up = status == "Up"
         self.adapter_data["status"] = status
         self.adapter_data["ip"]     = ip if ip else "N/A"
-        self.status_lbl.setText(f"  ● {t('adapter_status_up') if is_up else t('adapter_status_down')}")
-        self.status_lbl.setStyleSheet(f"color:{'#4CAF50' if is_up else '#F44336'}; font-size:12px;")
+        self.status_lbl.setText(
+            f"  ● {t('adapter_status_up') if is_up else t('adapter_status_down')}"
+        )
+        self.status_lbl.setStyleSheet(
+            f"color:{th('color_ok') if is_up else th('color_error')};"
+            f"font-size:{fs('font_small')};"
+        )
         if "adapter_ip" in self._data_labels:
             self._data_labels["adapter_ip"].setText(ip if ip else t("adapter_no_ip"))
 
@@ -1807,19 +2063,23 @@ class AdapterCard(QFrame):
         a = self.adapter_data
         if a["virtual"]:
             self.setStyleSheet(
-                "AdapterCard { background-color:#2a1f00; border:2px solid #ffaa00;"
-                "border-radius:10px; } QLabel { color:#ffffff; }"
+                f"AdapterCard {{ background-color:#2a1f00; border:2px solid "
+                f"{th('color_virtual_fg')}; border-radius:8px; }} "
+                f"QLabel {{ color:#ffffff; }}"
                 if selected else
-                "AdapterCard { background-color:#1a1a2e; border:1px solid #4a3800;"
-                "border-radius:10px; } QLabel { color:#aaaaaa; }"
+                f"AdapterCard {{ background-color:{th('color_bg_card')}; "
+                f"border:1px solid #4a3800; border-radius:8px; }} "
+                f"QLabel {{ color:{th('color_text_muted')}; }}"
             )
         else:
             self.setStyleSheet(
-                "AdapterCard { background-color:#1e3a5f; border:2px solid #4a9eff;"
-                "border-radius:10px; } QLabel { color:#ffffff; }"
+                f"AdapterCard {{ background-color:{th('color_accent_dark')}; border:2px solid "
+                f"{th('color_accent')}; border-radius:8px; }} "
+                f"QLabel {{ color:#ffffff; }}"
                 if selected else
-                "AdapterCard { background-color:#1a1a2e; border:1px solid #333;"
-                "border-radius:10px; } QLabel { color:#aaaaaa; }"
+                f"AdapterCard {{ background-color:{th('color_bg_card')}; "
+                f"border:1px solid #333; border-radius:8px; }} "
+                f"QLabel {{ color:{th('color_text_muted')}; }}"
             )
 
     def set_selected(self, selected):
@@ -1848,36 +2108,46 @@ class AdapterPanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # Felső sor: checkbox + frissítés gomb
         top_row = QHBoxLayout()
         top_row.setContentsMargins(10, 6, 10, 4)
 
         self.cb_virtual = QCheckBox(t("show_virtual"))
         self.cb_virtual.setChecked(False)
         self.cb_virtual.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.cb_virtual.setStyleSheet("""
-            QCheckBox { color:#888; font-size:11px; }
-            QCheckBox::indicator {
-                width:15px; height:15px;
-                border:1px solid #444; border-radius:3px; background:#1a1a2e;
-            }
-            QCheckBox::indicator:checked { background:#1e3a5f; border:1px solid #4a9eff; }
-            QCheckBox::indicator:hover   { border-color:#4a9eff; }
+        self.cb_virtual.setStyleSheet(f"""
+            QCheckBox {{
+                color:{th('color_text_muted')};
+                font-size:{fs('font_tiny')};
+            }}
+            QCheckBox::indicator {{
+                width:13px; height:13px;
+                border:1px solid #444;
+                border-radius:3px;
+                background:{th('color_bg_card')};
+            }}
+            QCheckBox::indicator:checked {{
+                background:{th('color_accent_dark')};
+                border:1px solid {th('color_accent')};
+            }}
+            QCheckBox::indicator:hover {{ border-color:{th('color_accent')}; }}
         """)
         self.cb_virtual.stateChanged.connect(self._on_virtual_toggled)
         top_row.addWidget(self.cb_virtual)
         top_row.addStretch()
 
         self.btn_refresh = QPushButton(t("btn_refresh"))
-        self.btn_refresh.setFixedHeight(22)
+        self.btn_refresh.setFixedHeight(th("btn_height_small"))
         self.btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_refresh.setStyleSheet("""
-            QPushButton {
-                background-color:#1a1a2e; color:#4a9eff;
-                border:1px solid #4a9eff; border-radius:4px;
-                font-size:11px; padding:0px 10px;
-            }
-            QPushButton:hover { background-color:#1e3a5f; }
+        self.btn_refresh.setStyleSheet(f"""
+            QPushButton {{
+                background-color:{th('color_bg_card')};
+                color:{th('color_accent')};
+                border:1px solid {th('color_accent')};
+                border-radius:4px;
+                font-size:{fs('font_tiny')};
+                padding:0px 8px;
+            }}
+            QPushButton:hover {{ background-color:{th('color_accent_dark')}; }}
         """)
         self.btn_refresh.clicked.connect(self._on_refresh_clicked)
         top_row.addWidget(self.btn_refresh)
@@ -1956,7 +2226,6 @@ class AdapterPanel(QWidget):
             self.selected_card = self.cards[0]
 
     def update_status_only(self, status_map):
-        """Csak a státuszt frissíti a kártyákon – nem építi újra a listát."""
         for card in self.cards:
             name = card.adapter_data["name"]
             if name in status_map:
@@ -1983,25 +2252,41 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(t("window_title"))
         self.setMinimumSize(900, 600)
         self.resize(1100, 700)
-        self._full_thread   = None
-        self._status_thread = None
-        self._cached_adapters = []
-        self._build_menu()
-        self._build_ui()
-        self._apply_global_style()
+
         icon_path = asset("MicroIPTool.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
-        # Első betöltés – teljes lekérés
+        self._full_thread     = None
+        self._status_thread   = None
+        self._cached_adapters = []
+
+        self._build_menu()
+        self._build_ui()
+        self._apply_global_style()
+
         self.full_refresh()
 
-        # Gyors állapot frissítés 5 másodpercenként – nem érinti a beviteli mezőket
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self._status_refresh)
         self.status_timer.start(5000)
 
-    # --- Teljes frissítés (induláskor + frissítés gomb) ---
+    def _font_increase(self):
+        global FONT_SCALE
+        if FONT_SCALE < FONT_SCALE_MAX:
+            FONT_SCALE = round(FONT_SCALE + FONT_SCALE_STEP, 1)
+            self.apply_font_scale()
+
+    def _font_decrease(self):
+        global FONT_SCALE
+        if FONT_SCALE > FONT_SCALE_MIN:
+            FONT_SCALE = round(FONT_SCALE - FONT_SCALE_STEP, 1)
+            self.apply_font_scale()
+
+    def _font_reset(self):
+        global FONT_SCALE
+        FONT_SCALE = 1.0
+        self.apply_font_scale()
 
     def full_refresh(self):
         if self._full_thread and self._full_thread.isRunning():
@@ -2026,8 +2311,6 @@ class MainWindow(QMainWindow):
             self.ping_tab.load_adapter(selected)
             self.scan_tab.load_adapter(selected)
 
-    # --- Gyors állapot frissítés (5 sec timer) ---
-
     def _status_refresh(self):
         if self._status_thread and self._status_thread.isRunning():
             return
@@ -2036,17 +2319,13 @@ class MainWindow(QMainWindow):
         self._status_thread.start()
 
     def _on_status_done(self, status_map):
-        """Frissíti a kártyák státuszát és az IP fül infó panelét – beviteli mezőket nem érinti."""
         self.adapter_panel.update_status_only(status_map)
-        # Ha van kiválasztott adapter, az infó panelt is frissítjük – de csak az infót
         selected = self.adapter_panel.get_selected_adapter()
         if selected and selected["name"] in status_map:
             s = status_map[selected["name"]]
             selected["status"] = s["status"]
             selected["ip"]     = s["ip"]
             self.ip_tab.update_info_only(selected)
-
-    # --- Szűrés ---
 
     def apply_filter(self):
         if not self._cached_adapters:
@@ -2057,15 +2336,11 @@ class MainWindow(QMainWindow):
         self.warning_bar.setText(warning)
         self.warning_bar.setVisible(bool(warning))
 
-    # --- Adapter kiválasztás ---
-
     def on_adapter_selected(self, card):
         self.adapter_panel.select_card(card)
         self.ip_tab.load_adapter(card.adapter_data)
         self.ping_tab.load_adapter(card.adapter_data)
         self.scan_tab.load_adapter(card.adapter_data)
-
-    # --- Nyelv ---
 
     def set_language(self, lang_code):
         global LANG
@@ -2074,34 +2349,44 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(0, t("tab_ip"))
         self.tabs.setTabText(1, t("tab_ping"))
         self.tabs.setTabText(2, t("tab_scan"))
-        self.ping_tab.update_texts()
-        self.scan_tab.update_texts()
         self.adapter_panel.update_texts()
         self.ip_tab.update_texts()
+        self.ping_tab.update_texts()
+        self.scan_tab.update_texts()
         if self._cached_adapters:
             filtered = filter_adapters(self._cached_adapters)
             self.adapter_panel.refresh(filtered)
         self.menuBar().clear()
         self._build_menu()
 
-    # --- Menüsor ---
-
     def _build_menu(self):
         menubar = self.menuBar()
-        menubar.setStyleSheet("""
-            QMenuBar {
-                background-color:#0d0d1a; color:#aaaaaa;
-                font-family:'Segoe UI'; font-size:12px;
-                border-bottom:1px solid #222; padding:2px;
-            }
-            QMenuBar::item:selected { background-color:#1e3a5f; color:#ffffff; }
-            QMenu {
-                background-color:#1a1a2e; color:#cccccc;
-                border:1px solid #333; font-size:12px;
-            }
-            QMenu::item:selected { background-color:#1e3a5f; color:#ffffff; }
-            QMenu::separator { height:1px; background:#333; margin:4px 10px; }
+        menubar.setStyleSheet(f"""
+            QMenuBar {{
+                background-color:{th('color_bg_dark')};
+                color:{th('color_text_muted')};
+                font-family:'Segoe UI';
+                font-size:{fs('font_small')};
+                border-bottom:1px solid #222;
+                padding:2px;
+            }}
+            QMenuBar::item:selected {{
+                background-color:{th('color_accent_dark')};
+                color:#ffffff;
+            }}
+            QMenu {{
+                background-color:{th('color_bg_card')};
+                color:{th('color_text')};
+                border:1px solid #333;
+                font-size:{fs('font_small')};
+            }}
+            QMenu::item:selected {{
+                background-color:{th('color_accent_dark')};
+                color:#ffffff;
+            }}
+            QMenu::separator {{ height:1px; background:#333; margin:4px 8px; }}
         """)
+
         file_menu = menubar.addMenu(t("menu_file"))
         exit_act  = QAction(t("menu_file_exit"), self)
         exit_act.triggered.connect(self.close)
@@ -2109,10 +2394,10 @@ class MainWindow(QMainWindow):
 
         settings_menu = menubar.addMenu(t("menu_settings"))
         lang_menu     = settings_menu.addMenu(t("menu_settings_lang"))
-        act_hu = QAction("🇭🇺  Magyar", self)
+        act_hu        = QAction("🇭🇺  Magyar", self)
         act_hu.triggered.connect(lambda: self.set_language("hu"))
         lang_menu.addAction(act_hu)
-        act_en = QAction("🇬🇧  English", self)
+        act_en        = QAction("🇬🇧  English", self)
         act_en.triggered.connect(lambda: self.set_language("en"))
         lang_menu.addAction(act_en)
 
@@ -2121,7 +2406,21 @@ class MainWindow(QMainWindow):
         about_act.triggered.connect(lambda: AboutDialog(self).exec())
         help_menu.addAction(about_act)
 
-    # --- UI ---
+        settings_menu.addSeparator()
+
+        font_menu    = settings_menu.addMenu("Betűméret" if LANG == "hu" else "Font size")
+
+        act_increase = QAction("🔺  Nagyobb  (A+)" if LANG == "hu" else "🔺  Larger  (A+)", self)
+        act_increase.triggered.connect(self._font_increase)
+        font_menu.addAction(act_increase)
+
+        act_decrease = QAction("🔻  Kisebb  (A-)" if LANG == "hu" else "🔻  Smaller  (A-)", self)
+        act_decrease.triggered.connect(self._font_decrease)
+        font_menu.addAction(act_decrease)
+
+        act_reset = QAction("↺  Alapméret" if LANG == "hu" else "↺  Default size", self)
+        act_reset.triggered.connect(self._font_reset)
+        font_menu.addAction(act_reset)
 
     def _build_ui(self):
         central = QWidget()
@@ -2131,16 +2430,19 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         self.warning_bar = QLabel("")
-        self.warning_bar.setStyleSheet(
-            "background-color:#7a4a00; color:#ffcc00; padding:6px 14px; font-size:12px;"
-        )
+        self.warning_bar.setStyleSheet(f"""
+            background-color:{th('color_warning_bg')};
+            color:{th('color_warning_fg')};
+            padding:6px 12px;
+            font-size:{fs('font_small')};
+        """)
         self.warning_bar.setVisible(False)
         main_layout.addWidget(self.warning_bar)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.splitter.setStyleSheet("""
-            QSplitter::handle { background-color:#333; width:2px; }
-            QSplitter::handle:hover { background-color:#4a9eff; }
+        self.splitter.setStyleSheet(f"""
+            QSplitter::handle {{ background-color:#333; width:2px; }}
+            QSplitter::handle:hover {{ background-color:{th('color_accent')}; }}
         """)
         self.splitter.setChildrenCollapsible(False)
 
@@ -2153,26 +2455,29 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
 
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane { border:none; background:#0f0f1a; }
-            QTabBar::tab {
-                background:#1a1a2e; color:#888;
-                padding:12px 24px; border:none;
-                font-size:12px; font-family:'Segoe UI';
-            }
-            QTabBar::tab:selected {
-                background:#0f0f1a; color:#4a9eff; border-bottom:2px solid #4a9eff;
-            }
-            QTabBar::tab:hover { background:#16213e; color:#ccc; }
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border:none; background:{th('color_bg')}; }}
+            QTabBar::tab {{
+                background:{th('color_bg_card')};
+                color:{th('color_text_muted')};
+                padding:10px 24px; border:none;
+                font-size:{fs('font_small')};
+                font-family:'Segoe UI';
+            }}
+            QTabBar::tab:selected {{
+                background:{th('color_bg')};
+                color:{th('color_accent')};
+                border-bottom:2px solid {th('color_accent')};
+            }}
+            QTabBar::tab:hover {{ background:#16213e; color:{th('color_text')}; }}
         """)
 
-        self.ip_tab = IPSettingsTab()
-        self.tabs.addTab(self.ip_tab, t("tab_ip"))
-
+        self.ip_tab   = IPSettingsTab()
         self.ping_tab = PingTab()
-        self.tabs.addTab(self.ping_tab, t("tab_ping"))
-
         self.scan_tab = ScanTab()
+
+        self.tabs.addTab(self.ip_tab,   t("tab_ip"))
+        self.tabs.addTab(self.ping_tab, t("tab_ping"))
         self.tabs.addTab(self.scan_tab, t("tab_scan"))
 
         right_layout.addWidget(self.tabs)
@@ -2182,30 +2487,109 @@ class MainWindow(QMainWindow):
         self.splitter.setSizes([280, 820])
         main_layout.addWidget(self.splitter, stretch=1)
 
-        self.status_bar_label = QLabel()
-        self.status_bar_label.setFixedHeight(28)
-        self.status_bar_label.setStyleSheet(
-            "background-color:#0d0d1a; color:#555; padding:0px 14px;"
-            "font-size:11px; border-top:1px solid #222;"
-        )
-        main_layout.addWidget(self.status_bar_label)
+        # Alsó státusz sáv – bal oldal: PC info, jobb oldal: verzió
+        status_bar_widget = QWidget()
+        status_bar_widget.setFixedHeight(28)
+        status_bar_widget.setStyleSheet(f"""
+            background-color:{th('color_bg_dark')};
+            border-top:1px solid #222;
+        """)
+        status_bar_layout = QHBoxLayout(status_bar_widget)
+        status_bar_layout.setContentsMargins(0, 0, 0, 0)
+        status_bar_layout.setSpacing(0)
 
-    def _apply_global_style(self):
-        self.setStyleSheet("""
-            QMainWindow, QWidget {
-                background-color:#0f0f1a; color:#cccccc;
-                font-family:'Segoe UI'; font-size:12px;
-            }
-            QScrollBar:vertical { background:#1a1a2e; width:6px; border-radius:3px; }
-            QScrollBar::handle:vertical { background:#333; border-radius:3px; }
+        self.status_bar_label = QLabel()
+        self.status_bar_label.setStyleSheet(f"""
+            color:{th('color_text_dim')};
+            padding:0px 12px;
+            font-size:{fs('font_tiny')};
         """)
 
+        version_label = QLabel(f"v{APP_VERSION}")
+        version_label.setFixedWidth(60)
+        version_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        version_label.setStyleSheet(f"""
+            color:{th('color_text_dim')};
+            padding:0px 12px;
+            font-size:{fs('font_tiny')};
+        """)
+
+        status_bar_layout.addWidget(self.status_bar_label, stretch=1)
+        status_bar_layout.addWidget(version_label)
+        main_layout.addWidget(status_bar_widget)
+
+    def _apply_global_style(self):
+        self.setStyleSheet(f"""
+            QMainWindow, QWidget {{
+                background-color:{th('color_bg')};
+                color:{th('color_text')};
+                font-family:'Segoe UI';
+                font-size:{fs('font_small')};
+            }}
+            QScrollBar:vertical {{
+                background:{th('color_bg_card')};
+                width:6px;
+                border-radius:3px;
+            }}
+            QScrollBar::handle:vertical {{
+                background:#333;
+                border-radius:3px;
+            }}
+        """)
+
+    def apply_font_scale(self):
+        """Újraépíti a teljes UI-t az új betűmérettel."""
+        current_tab = self.tabs.currentIndex()
+
+        self._apply_global_style()
+
+        # Tab feliratok frissítése
+        self.tabs.setTabText(0, t("tab_ip"))
+        self.tabs.setTabText(1, t("tab_ping"))
+        self.tabs.setTabText(2, t("tab_scan"))
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border:none; background:{th('color_bg')}; }}
+            QTabBar::tab {{
+                background:{th('color_bg_card')};
+                color:{th('color_text_muted')};
+                padding:10px 24px; border:none;
+                font-size:{fs('font_small')};
+                font-family:'Segoe UI';
+            }}
+            QTabBar::tab:selected {{
+                background:{th('color_bg')};
+                color:{th('color_accent')};
+                border-bottom:2px solid {th('color_accent')};
+            }}
+            QTabBar::tab:hover {{ background:#16213e; color:{th('color_text')}; }}
+        """)
+
+        # Menüsor újraépítése
+        self.menuBar().clear()
+        self._build_menu()
+
+        # Egyedi widgetek stílusfrissítése
+        self.ip_tab.refresh_styles()
+        self.ip_tab.update_texts()
+        self.ping_tab.refresh_styles()
+        self.ping_tab.update_texts()
+        self.scan_tab.refresh_styles()
+        self.scan_tab.update_texts()
+        self.adapter_panel.update_texts()
+
+        # Adapter kártyák újrarajzolása az új méretekkel
+        if self._cached_adapters:
+            filtered = filter_adapters(self._cached_adapters)
+            self.adapter_panel.refresh(filtered)
+
+        self.tabs.setCurrentIndex(current_tab) 
 
 # ---------------------------------------------------------------------------
 # Belépési pont
 # ---------------------------------------------------------------------------
 
-# MAC adatbázis betöltése induláskor
 load_mac_db()
 
 if __name__ == "__main__":

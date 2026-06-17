@@ -1,47 +1,51 @@
 # MicroIPTool
 
-MicroIPTool egy egyszerű, grafikus felületű hálózati segédprogram Windows rendszerhez, amely megkönnyíti a mindennapi hálózati beállításokat és diagnosztikát.
+🇬🇧 English version: [README.md](README.md)
+
+A MicroIPTool egy egyszerű grafikus hálózati segédprogram Windows rendszerre, amely a mindennapi hálózati beállításokat és diagnosztikát hivatott megkönnyíteni.
 
 ## ⚙️ Funkciók
 
 * Hálózati adapterek listázása
-* Adapter információk megjelenítése
-* IP konfiguráció beállítása:
+* Adapterek adatainak megjelenítése
+* IP beállítások konfigurálása:
 
   * DHCP mód
   * Statikus IP cím
-* IP cím pingelése
-* Alap hálózati scannelés (ping sweep)
+* Megadott IP cím pingelése
+* Alap hálózati szkennelés (ping sweep)
+* Állítható alkalmazás-betűméret
 * Többnyelvű felület:
 
   * Magyar
   * Angol
-* Hibalogolás fájlba
+* Hibák naplózása fájlba
 
 ## 📌 Állapot
 
-Verzió: **0.8 (Beta)**
+Verzió: **1.0.0**
 
-A program már használható, de még fejlesztés alatt állhat, kisebb hibák előfordulhatnak.
+Első stabil kiadás.
 
-## 💻 Rendszerkövetelmények
+## 💻 Követelmények
 
 * Windows 10/11 operációs rendszer
-* Adminisztrátori jogosultság (IP beállítás módosításához)
+* Rendszergazdai jogosultság (IP beállítás módosításához szükséges)
 
 ## ▶️ Használat
 
-A program telepítést nem igényel.
+Telepítés nem szükséges.
 
-1. Indítsd el a `.exe` fájlt
+1. Indítsd el az `.exe` fájlt
 2. Válaszd ki a kívánt hálózati adaptert
-3. Állítsd be az IP konfigurációt vagy használd a ping / scan funkciókat
+3. Állítsd be az IP-t vagy használd a ping / scan funkciókat
 
 ## 🌐 Nyelv
 
-A program magyar és angol nyelven is használható, a nyelv a menüből váltható.
+Az alkalmazás támogatja a magyar és angol nyelvet.
+A nyelv a menüből váltható.
 
-🛡️ Biztonsági megjegyzés
+## 🛡️ Biztonsági megjegyzés
 
 A futtatható fájl vírusellenőrzésen esett át.
 
@@ -50,22 +54,30 @@ A PyInstaller használata miatt előfordulhat, hogy egyes vírusirtók hamis poz
 A program biztonságosan használható, ha a hivatalos GitHub tárolóból lett letöltve.
 
 VirusTotal ellenőrzés:
-https://www.virustotal.com/gui/file/751e6c4dd9a5be662119360db8dc70b38086a1c249d8dbc8288ea24b1e7a2469/detection
+https://www.virustotal.com/gui/file/0d0353bc30a0a94dce2248e29d6b5cb0cf0ea136137a5a8d0d4a75ef86616592/detection
 
 ## 📝 Megjegyzés
 
-Ez egy saját használatra készült eszköz, amely később lett publikálva mások számára is.
-A fejlesztés folyamatos, a funkciók és működés változhatnak.
+A program eredetileg saját használatra készült, majd később került megosztásra.
 
-📄 Változások
+A fejlesztés folyamatos, a funkciók a jövőben változhatnak.
 
-v0.8.1
+## 📄 Változások
+
+### v1.0.0
+
+* Állítható betűméret beállítás hozzáadása
+* Szkennelési tartomány kezelésének javítása
+* IP cím mezők billentyűzetkezelési hibájának javítása (a Shift billentyű már nem léptet a következő mezőre)
+* Általános stabilitási és használhatósági fejlesztések
+
+### v0.8.1
 
 * Szkennelés stabilitásának javítása
 * Pontosabb eszközfelismerés szkennelés során
 * Betűméret növelése a jobb olvashatóság érdekében
 
-v0.8
+### v0.8
 
 * Első publikus verzió
 * IP beállítás
@@ -74,7 +86,7 @@ v0.8
 
 ## 👤 Készítő
 
-Nozy82
+Balázs [Vezetéknév] (Nozy82)
 
 ## 🔗 GitHub
 
